@@ -1,0 +1,3898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WinBox AI Chat</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/winbox@0.2.82/dist/css/winbox.min.css" />
+  <script src="https://unpkg.com/winbox@0.2.82/dist/winbox.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+
+  <style>
+    /* ── Reset & base ─────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* ── Launcher ─────────────────────────────────── */
+    #launcher { text-align: center; color: #ccc; }
+    #launcher h1 { font-size: 2rem; font-weight: 700; color: #fff; letter-spacing: -.5px; margin-bottom: .4rem; }
+    #launcher p  { font-size: .95rem; color: #888; margin-bottom: 1.5rem; }
+    #launcher button {
+      padding: .65rem 1.6rem; font-size: 1rem; font-weight: 600;
+      background: #6c63ff; color: #fff; border: none; border-radius: 8px;
+      cursor: pointer; transition: background .15s;
+    }
+    #launcher button:hover { background: #574fd6; }
+
+    /* ── Chat root ────────────────────────────────── */
+    #chat-root {
+      display: flex; flex-direction: column; height: 100%;
+      background: #1a1b23; color: #e0e0e0; font-size: 14px; overflow: hidden;
+    }
+
+    /* ── Toolbar ──────────────────────────────────── */
+    #chat-toolbar {
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 10px; background: #13141b;
+      border-bottom: 1px solid #2a2b38; flex-shrink: 0;
+    }
+    #chat-toolbar select, #chat-toolbar input[type="password"] {
+      background: #22232e; border: 1px solid #33344a; color: #e0e0e0;
+      border-radius: 6px; padding: 4px 8px; font-size: 12px; outline: none;
+    }
+    #model-select    { flex: 1.2; }
+    #api-key-input   { flex: 1.8; letter-spacing: .08em; }
+    #api-key-input::placeholder { color: #555; letter-spacing: 0; }
+
+    .tb-btn {
+      background: transparent; border: 1px solid #33344a; color: #888;
+      border-radius: 6px; padding: 4px 9px; font-size: 12px;
+      cursor: pointer; transition: color .15s, border-color .15s, background .15s;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .tb-btn:hover { color: #e0e0e0; border-color: #6c63ff; }
+    .tb-btn.active { background: #6c63ff22; border-color: #6c63ff; color: #a89fff; }
+
+    #db-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #444; flex-shrink: 0; cursor: default;
+      transition: background .3s;
+    }
+    #db-dot.ok  { background: #23c7a8; }
+    #db-dot.err { background: #ff6b6b; }
+    #db-dot[title] { cursor: help; }
+
+    /* ── Autocomplete bar ─────────────────────────── */
+    #cmd-hint {
+      display: none; position: absolute; z-index: 9999;
+      background: #1e1f2b; border: 1px solid #33344a; border-radius: 8px;
+      padding: 4px 0; min-width: 280px; max-width: 440px;
+      box-shadow: 0 8px 24px #000a;
+    }
+    .hint-item {
+      padding: 6px 12px; cursor: pointer; display: flex; gap: 10px;
+      align-items: baseline;
+    }
+    .hint-item:hover, .hint-item.selected { background: #6c63ff33; }
+    .hint-cmd   { color: #a89fff; font-family: monospace; font-size: 13px; }
+    .hint-desc  { color: #666; font-size: 11px; }
+
+    /* ── Messages ─────────────────────────────────── */
+    #messages {
+      flex: 1; overflow-y: auto; padding: 14px 12px;
+      display: flex; flex-direction: column; gap: 10px; scroll-behavior: smooth;
+    }
+    #messages::-webkit-scrollbar { width: 5px; }
+    #messages::-webkit-scrollbar-thumb { background: #2e2f40; border-radius: 3px; }
+
+    .msg { display: flex; gap: 10px; animation: fadeIn .18s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } }
+
+    .msg.user      { flex-direction: row-reverse; }
+    .msg.system    { justify-content: center; }
+    .msg.tool-call { justify-content: flex-start; }
+
+    .avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; flex-shrink: 0; margin-top: 2px;
+    }
+    .msg.user .avatar      { background: #6c63ff; }
+    .msg.assistant .avatar { background: #23c7a8; }
+    .msg.tool-call .avatar { background: #f4a261; }
+
+    .bubble {
+      max-width: 78%; padding: 9px 13px; border-radius: 12px;
+      line-height: 1.55; word-break: break-word;
+    }
+    .msg.user .bubble      { background: #6c63ff; color: #fff; border-bottom-right-radius: 3px; }
+    .msg.assistant .bubble { background: #22232e; border: 1px solid #2e2f40; border-bottom-left-radius: 3px; }
+    .msg.system .bubble    { background: #1e1f2b; color: #9a9ab0; font-size: 12px; padding: 5px 10px; border-radius: 6px; border: 1px solid #2a2b38; }
+
+    /* tool-call bubble */
+    .msg.tool-call .bubble {
+      background: #1e1f2b; border: 1px solid #f4a26133;
+      border-bottom-left-radius: 3px; font-size: 12px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .tc-name  { color: #f4a261; font-family: monospace; }
+    .tc-args  { color: #888; font-family: monospace; word-break: break-all; }
+    .tc-badge {
+      display: inline-block; padding: 1px 6px; border-radius: 4px;
+      font-size: 10px; font-weight: 700; margin-top: 2px;
+    }
+    .tc-badge.ok  { background: #23c7a822; color: #23c7a8; }
+    .tc-badge.err { background: #ff6b6b22; color: #ff6b6b; }
+
+    /* markdown */
+    .bubble p       { margin: 0 0 .5em; }
+    .bubble p:last-child { margin-bottom: 0; }
+    .bubble pre     { background: #13141b; border: 1px solid #2a2b38; border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-size: 12px; margin: .5em 0; }
+    .bubble code    { background: #13141b; border-radius: 3px; padding: 1px 4px; font-size: 12px; }
+    .bubble pre code { background: transparent; padding: 0; }
+    .bubble ul, .bubble ol { padding-left: 1.4em; margin: .4em 0; }
+    .bubble table   { border-collapse: collapse; font-size: 12px; width: 100%; }
+    .bubble th, .bubble td { border: 1px solid #2e2f40; padding: 4px 8px; text-align: left; }
+    .bubble th      { background: #13141b; color: #a89fff; }
+
+    /* typing dots */
+    .typing-dots span {
+      display: inline-block; width: 6px; height: 6px;
+      background: #23c7a8; border-radius: 50%; margin: 0 1px;
+      animation: bounce .9s infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .15s; }
+    .typing-dots span:nth-child(3) { animation-delay: .30s; }
+    @keyframes bounce { 0%,80%,100% { transform: translateY(0); } 40% { transform: translateY(-5px); } }
+
+    /* ── Token / status bar ───────────────────────── */
+    #status-bar {
+      font-size: 11px; color: #444; padding: 2px 12px 3px;
+      text-align: right; background: #13141b; flex-shrink: 0;
+    }
+
+    /* ── Input area ───────────────────────────────── */
+    #input-wrap  { position: relative; }
+    #input-area  {
+      display: flex; gap: 8px; padding: 8px 10px;
+      background: #13141b; border-top: 1px solid #2a2b38; flex-shrink: 0;
+    }
+    #user-input {
+      flex: 1; background: #22232e; border: 1px solid #33344a; color: #e0e0e0;
+      border-radius: 8px; padding: 8px 12px; font-size: 14px;
+      outline: none; resize: none; min-height: 38px; max-height: 120px;
+      line-height: 1.4; font-family: inherit; transition: border-color .15s;
+    }
+    #user-input:focus   { border-color: #6c63ff; }
+    #user-input::placeholder { color: #555; }
+
+    #btn-send {
+      align-self: flex-end; background: #6c63ff; border: none; color: #fff;
+      border-radius: 8px; width: 38px; height: 38px; font-size: 16px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background .15s; flex-shrink: 0;
+    }
+    #btn-send:hover:not(:disabled) { background: #574fd6; }
+    #btn-send:disabled { opacity: .4; cursor: default; }
+
+    /* ── Modal internals ──────────────────────────── */
+    .modal-root {
+      display: flex; flex-direction: column;
+      height: 100%; background: #1a1b23; color: #e0e0e0;
+      font-size: 13px; overflow: hidden;
+    }
+    .modal-body {
+      flex: 1; overflow: auto; padding: 14px;
+    }
+    .modal-body::-webkit-scrollbar { width: 5px; }
+    .modal-body::-webkit-scrollbar-thumb { background: #2e2f40; border-radius: 3px; }
+    .modal-footer {
+      padding: 10px 14px; border-top: 1px solid #2a2b38;
+      display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0;
+    }
+
+    /* form elements inside modals */
+    .modal-body label { display: block; color: #888; font-size: 11px; margin-bottom: 4px; margin-top: 12px; }
+    .modal-body label:first-child { margin-top: 0; }
+    .modal-body input[type="text"],
+    .modal-body input[type="password"],
+    .modal-body textarea,
+    .modal-body select {
+      width: 100%; background: #22232e; border: 1px solid #33344a;
+      color: #e0e0e0; border-radius: 6px; padding: 7px 10px;
+      font-size: 13px; font-family: inherit; outline: none;
+      transition: border-color .15s;
+    }
+    .modal-body input:focus,
+    .modal-body textarea:focus { border-color: #6c63ff; }
+    .modal-body textarea { resize: vertical; min-height: 80px; }
+
+    /* buttons */
+    .btn-primary, .btn-secondary, .btn-danger {
+      padding: 6px 16px; border-radius: 6px; font-size: 13px;
+      font-weight: 600; cursor: pointer; border: none; transition: background .15s;
+    }
+    .btn-primary   { background: #6c63ff; color: #fff; }
+    .btn-primary:hover   { background: #574fd6; }
+    .btn-secondary { background: #22232e; color: #aaa; border: 1px solid #33344a; }
+    .btn-secondary:hover { color: #fff; border-color: #555; }
+    .btn-danger    { background: #ff4444; color: #fff; }
+    .btn-danger:hover    { background: #cc0000; }
+
+    /* data table inside modals */
+    .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .data-table th { background: #13141b; color: #a89fff; padding: 6px 10px; border: 1px solid #2e2f40; text-align: left; position: sticky; top: 0; }
+    .data-table td { padding: 5px 10px; border: 1px solid #2e2f40; color: #ccc; }
+    .data-table tr:hover td { background: #22232e; }
+    .data-table-wrap { overflow: auto; max-height: 100%; }
+
+    /* log stream */
+    .log-stream {
+      font-family: monospace; font-size: 12px; background: #13141b;
+      border-radius: 6px; padding: 10px; height: 100%;
+      overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+      color: #ccc; line-height: 1.6;
+    }
+    .log-stream .log-tool   { color: #f4a261; }
+    .log-stream .log-ok     { color: #23c7a8; }
+    .log-stream .log-err    { color: #ff6b6b; }
+    .log-stream .log-done   { color: #a89fff; font-weight: bold; }
+
+    /* help table */
+    .help-table { width: 100%; border-collapse: collapse; }
+    .help-table td { padding: 6px 10px; border-bottom: 1px solid #2a2b38; vertical-align: top; }
+    .help-table td:first-child { color: #a89fff; font-family: monospace; white-space: nowrap; }
+    .help-table td:last-child  { color: #888; }
+    .help-table tr:last-child td { border-bottom: none; }
+
+    /* confirm modal */
+    .confirm-msg { color: #e0e0e0; line-height: 1.6; padding-bottom: 4px; }
+    .confirm-msg strong { color: #ff6b6b; }
+
+    /* ── Model Picker ─────────────────────────────── */
+    .mp-wrap { display: flex; flex-direction: column; height: 100%; }
+    .mp-controls {
+      display: flex; gap: 6px; padding: 8px 10px;
+      background: #13141b; border-bottom: 1px solid #2a2b38; flex-shrink: 0;
+    }
+    #mp-search {
+      flex: 1; background: #22232e; border: 1px solid #33344a; color: #e0e0e0;
+      border-radius: 6px; padding: 5px 10px; font-size: 12px; outline: none;
+      font-family: inherit;
+    }
+    #mp-search:focus { border-color: #6c63ff; }
+    #mp-cap, #mp-sort {
+      background: #22232e; border: 1px solid #33344a; color: #e0e0e0;
+      border-radius: 6px; padding: 5px 8px; font-size: 12px; outline: none; cursor: pointer;
+    }
+    .mp-table-wrap { flex: 1; overflow-y: auto; }
+    .mp-table-wrap::-webkit-scrollbar { width: 5px; }
+    .mp-table-wrap::-webkit-scrollbar-thumb { background: #2e2f40; border-radius: 3px; }
+    .mp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .mp-table thead th {
+      background: #13141b; color: #a89fff; padding: 7px 10px;
+      border-bottom: 1px solid #2e2f40; text-align: left;
+      position: sticky; top: 0; font-size: 11px; font-weight: 600;
+      letter-spacing: .4px; white-space: nowrap;
+    }
+    .mp-row { cursor: pointer; border-bottom: 1px solid #1e1f2b; }
+    .mp-row:hover td { background: #22232e; }
+    .mp-row-selected td { background: #6c63ff22 !important; }
+    .mp-row td { padding: 6px 10px; color: #ccc; vertical-align: middle; }
+    .mp-col-name { min-width: 200px; max-width: 280px; }
+    .mp-model-name { color: #e0e0e0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mp-model-id   { color: #555; font-size: 10px; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mp-col-num    { text-align: right; white-space: nowrap; font-family: monospace; font-size: 11px; }
+    .mp-badge {
+      display: inline-block; padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700; margin-right: 2px; letter-spacing: .3px;
+    }
+    .mp-badge-text  { background: #2d3a5c; color: #7ab3ff; }
+    .mp-badge-image { background: #1f3c2e; color: #4fd1a5; }
+    .mp-badge-audio { background: #3c2d50; color: #c97aff; }
+    .mp-badge-file  { background: #3c3020; color: #ffba6b; }
+    .mp-price-free  { color: #23c7a8; }
+    .mp-price-cheap { color: #a8d8a0; }
+    .mp-price-mid   { color: #f4a261; }
+    .mp-price-exp   { color: #ff6b6b; }
+    .mp-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px; background: #13141b; border-top: 1px solid #2a2b38; flex-shrink: 0;
+    }
+    .mp-count { color: #555; font-size: 11px; }
+
+    /* ── Agent Profiles Modal ────────────────────────── */
+    .ap-root {
+      display: flex; height: 100%;
+      background: #1a1b23; color: #e0e0e0; font-size: 13px; overflow: hidden;
+    }
+    .ap-left {
+      width: 210px; flex-shrink: 0; border-right: 1px solid #2a2b38;
+      display: flex; flex-direction: column; padding: 10px; gap: 6px;
+    }
+    .ap-section-title {
+      font-size: 11px; font-weight: 600; color: #a89fff;
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+    .ap-dropdown {
+      width: 100%; background: #22232e; border: 1px solid #33344a;
+      color: #e0e0e0; border-radius: 6px; padding: 5px 8px;
+      font-size: 12px; outline: none; cursor: pointer; font-family: inherit;
+    }
+    .ap-dropdown:focus { border-color: #6c63ff; }
+    .ap-spacer { flex: 1; }
+    .ap-btn-row { display: flex; gap: 4px; }
+    .ap-btn { flex: 1; border: none; border-radius: 5px; padding: 6px 2px; font-size: 11px; font-weight: 700; cursor: pointer; }
+    .ap-btn-use  { background: #2244cc; color: #fff; }
+    .ap-btn-use:hover  { background: #1a35b0; }
+    .ap-btn-edit { background: #22aa44; color: #fff; }
+    .ap-btn-edit:hover { background: #199939; }
+    .ap-btn-del  { background: #cc2222; color: #fff; }
+    .ap-btn-del:hover  { background: #aa1515; }
+    .ap-right {
+      flex: 1; display: flex; flex-direction: column;
+      padding: 12px; gap: 3px; overflow-y: auto; min-width: 0;
+    }
+    .ap-lbl { font-size: 11px; color: #888; margin-top: 8px; }
+    .ap-lbl:first-child { margin-top: 0; }
+    .ap-inp {
+      width: 100%; background: #22232e; border: 1px solid #33344a;
+      color: #e0e0e0; border-radius: 6px; padding: 6px 9px;
+      font-size: 12px; font-family: inherit; outline: none; transition: border-color .15s;
+    }
+    .ap-inp:focus { border-color: #6c63ff; }
+    textarea.ap-inp { resize: vertical; }
+    .ap-save {
+      margin-top: 10px; width: 100%;
+      background: #22aa44; color: #fff; border: none; border-radius: 6px;
+      padding: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
+    }
+    .ap-save:hover { background: #199939; }
+
+    /* ── Tools Engine Modal ──────────────────────────── */
+    .te-root {
+      display: flex; height: 100%;
+      background: #1a1b23; color: #e0e0e0; font-size: 13px; overflow: hidden;
+    }
+    .te-left {
+      width: 190px; flex-shrink: 0; border-right: 1px solid #2a2b38;
+      display: flex; flex-direction: column; padding: 10px; gap: 6px;
+    }
+    .te-section-title {
+      font-size: 11px; font-weight: 600; color: #a89fff;
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+    .te-toggle {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: #e0e0e0; cursor: pointer;
+      padding: 6px 8px; background: #22232e; border: 1px solid #33344a;
+      border-radius: 6px; user-select: none;
+    }
+    .te-toggle input { accent-color: #6c63ff; cursor: pointer; }
+    .te-list {
+      flex: 1; width: 100%; background: #22232e; border: 1px solid #33344a;
+      color: #e0e0e0; border-radius: 6px; padding: 4px;
+      font-size: 12px; font-family: monospace; outline: none; overflow-y: auto;
+    }
+    .te-list option { padding: 4px 6px; }
+    .te-left-btns { display: flex; flex-direction: column; gap: 4px; }
+    .te-btn-edit {
+      width: 100%; background: transparent; color: #e0e0e0;
+      border: 1px solid #33344a; border-radius: 5px; padding: 6px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .te-btn-edit:hover { border-color: #6c63ff; color: #a89fff; }
+    .te-btn-del {
+      width: 100%; background: #1a0a0a; color: #ff6b6b;
+      border: 1px solid #ff444433; border-radius: 5px; padding: 6px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .te-btn-del:hover { background: #ff444422; }
+    .te-right {
+      flex: 1; display: flex; flex-direction: column;
+      padding: 12px; gap: 3px; overflow-y: auto; min-width: 0;
+    }
+    .te-lbl { font-size: 11px; color: #888; margin-top: 6px; }
+    .te-lbl:first-child { margin-top: 0; }
+    .te-inp {
+      width: 100%; background: #22232e; border: 1px solid #33344a;
+      color: #e0e0e0; border-radius: 6px; padding: 6px 9px;
+      font-size: 12px; font-family: inherit; outline: none; transition: border-color .15s;
+    }
+    .te-inp:focus { border-color: #6c63ff; }
+    textarea.te-inp { resize: vertical; min-height: 50px; }
+    .te-code { font-family: monospace !important; }
+    .te-terminal {
+      margin-top: 6px; background: #0d0d0d; border-radius: 6px;
+      padding: 8px 12px; font-family: monospace; font-size: 12px;
+      color: #23c7a8; min-height: 38px; line-height: 1.5; white-space: pre-wrap;
+    }
+    .te-action-row { display: flex; gap: 6px; margin-top: 6px; }
+    .te-btn-test {
+      flex: 1; background: #7c3aed; color: #fff; border: none;
+      border-radius: 6px; padding: 7px; font-size: 12px; font-weight: 700;
+      cursor: pointer; text-transform: uppercase;
+    }
+    .te-btn-test:hover { background: #6d28d9; }
+    .te-btn-save {
+      flex: 1; background: #111827; color: #fff;
+      border: 1px solid #374151; border-radius: 6px; padding: 7px;
+      font-size: 12px; font-weight: 700; cursor: pointer; text-transform: uppercase;
+    }
+    .te-btn-save:hover { background: #1f2937; }
+
+    /* ── Upload button & file preview ───────────────── */
+    #btn-upload {
+      align-self: flex-end; background: #22232e; border: 1px solid #33344a;
+      color: #777; border-radius: 8px; width: 38px; height: 38px; font-size: 17px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: color .15s, border-color .15s;
+    }
+    #btn-upload:hover { color: #e0e0e0; border-color: #6c63ff; }
+    #btn-upload.has-files { border-color: #23c7a8; color: #23c7a8; }
+    #file-preview {
+      display: none; flex-wrap: wrap; gap: 4px;
+      padding: 5px 10px 0; background: #13141b;
+    }
+    #file-preview.visible { display: flex; }
+    .file-chip {
+      display: flex; align-items: center; gap: 4px; max-width: 200px;
+      background: #22232e; border: 1px solid #33344a; border-radius: 5px;
+      padding: 2px 7px; font-size: 11px; color: #aaa; cursor: default;
+    }
+    .file-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-chip-x { cursor: pointer; color: #555; font-size: 13px; flex-shrink: 0; }
+    .file-chip-x:hover { color: #ff6b6b; }
+    .attach-label { font-size: 11px; color: #888; font-style: italic; }
+        .chat-img { max-width: 260px; max-height: 260px; border-radius: 8px; border: 1px solid #2e2f40; display: block; margin: 4px 0; object-fit: cover; }
+
+    /* ── Conversations Modal ─────────────────────────── */
+    .cv-root { display:flex; flex-direction:column; height:100%; background:#1a1b23; color:#e0e0e0; font-size:13px; overflow:hidden; }
+    .cv-save-bar {
+      display:flex; align-items:center; gap:6px; padding:10px 12px;
+      border-bottom:1px solid #2a2b38; flex-shrink:0;
+    }
+    .cv-save-bar input {
+      flex:1; background:#22232e; border:1px solid #33344a; color:#e0e0e0;
+      border-radius:6px; padding:6px 10px; font-size:12px; outline:none; font-family:inherit;
+    }
+    .cv-save-bar input:focus { border-color:#6c63ff; }
+    .cv-btn-save { background:#22aa44; color:#fff; border:none; border-radius:6px; padding:6px 14px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; }
+    .cv-btn-save:hover { background:#199939; }
+    .cv-list { flex:1; overflow-y:auto; }
+    .cv-list::-webkit-scrollbar { width:5px; }
+    .cv-list::-webkit-scrollbar-thumb { background:#2e2f40; border-radius:3px; }
+    .cv-item {
+      display:flex; align-items:center; gap:8px; padding:9px 12px;
+      border-bottom:1px solid #1e1f2b; transition:background .1s;
+    }
+    .cv-item:hover { background:#22232e; }
+    .cv-item-info { flex:1; min-width:0; }
+    .cv-item-name { font-size:13px; color:#e0e0e0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .cv-item-meta { font-size:10px; color:#555; margin-top:1px; }
+    .cv-btn-load { background:#6c63ff22; color:#a89fff; border:1px solid #6c63ff44; border-radius:5px; padding:4px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
+    .cv-btn-load:hover { background:#6c63ff44; }
+    .cv-btn-del  { background:#ff444422; color:#ff6b6b; border:1px solid #ff444433; border-radius:5px; padding:4px 8px; font-size:11px; cursor:pointer; }
+    .cv-btn-del:hover  { background:#ff444433; }
+    .cv-empty { text-align:center; padding:40px 20px; color:#444; font-size:12px; line-height:1.8; }
+
+    /* ── Text/Code Editor Widget ─────────────────────── */
+    .ed-root { display:flex; flex-direction:column; height:100%; background:#111218; overflow:hidden; }
+    .ed-toolbar {
+      display:flex; align-items:center; gap:4px; padding:5px 8px;
+      background:#13141b; border-bottom:1px solid #2a2b38; flex-shrink:0;
+    }
+    .ed-filename {
+      flex:1; min-width:0; background:#1e1f2b; border:1px solid #2e2f40; color:#e0e0e0;
+      border-radius:5px; padding:4px 8px; font-size:12px; outline:none; font-family:inherit;
+    }
+    .ed-filename:focus { border-color:#6c63ff; }
+    .ed-lang {
+      background:#1e1f2b; border:1px solid #2e2f40; color:#888; border-radius:5px;
+      padding:4px 6px; font-size:11px; outline:none; cursor:pointer; flex-shrink:0;
+    }
+    .ed-lang:focus { border-color:#6c63ff; }
+    .ed-tbtn {
+      background:#1e1f2b; border:1px solid #2e2f40; color:#777; border-radius:5px;
+      padding:4px 8px; font-size:11px; cursor:pointer; white-space:nowrap; flex-shrink:0;
+      transition:color .12s, border-color .12s;
+    }
+    .ed-tbtn:hover { color:#e0e0e0; border-color:#6c63ff; }
+    .ed-wrap { flex:1; display:flex; overflow:hidden; }
+    .ed-lines {
+      width:42px; flex-shrink:0; background:#0d0e14; color:#3a3b50;
+      font-family:monospace; font-size:13px; line-height:1.6; padding:12px 6px 12px 0;
+      text-align:right; user-select:none; overflow:hidden; white-space:pre;
+    }
+    .ed-textarea {
+      flex:1; resize:none; background:#111218; border:none; color:#e0e0e0;
+      font-family:'Cascadia Code','Fira Code','Consolas',monospace; font-size:13px;
+      line-height:1.6; padding:12px; outline:none; tab-size:2; overflow:auto;
+      word-break:normal; white-space:pre;
+    }
+    .ed-textarea::selection { background:#6c63ff44; }
+    .ed-statusbar {
+      padding:3px 10px; background:#0d0e14; border-top:1px solid #1e1f2b;
+      font-size:10px; color:#3a3b50; display:flex; gap:12px; flex-shrink:0;
+      font-family:monospace;
+    }
+    .ed-statusbar .ed-sl { color:#555; }
+    .ed-tbtn-db { background:#6c63ff1a; border-color:#6c63ff44 !important; color:#a89fff !important; }
+    .ed-tbtn-db:hover { background:#6c63ff33 !important; }
+    .ed-tbtn-db.dirty { color:#f4a261 !important; border-color:#f4a26166 !important; }
+    .ed-tbtn-db.saved { color:#23c7a8 !important; border-color:#23c7a844 !important; }
+
+    /* ── File Explorer Modal ─────────────────────────── */
+    .fe-root { display:flex; flex-direction:column; height:100%; background:#1a1b23; color:#e0e0e0; font-size:13px; overflow:hidden; }
+    .fe-toolbar {
+      display:flex; align-items:center; gap:6px; padding:7px 10px;
+      background:#13141b; border-bottom:1px solid #2a2b38; flex-shrink:0;
+    }
+    .fe-search {
+      flex:1; background:#22232e; border:1px solid #33344a; color:#e0e0e0;
+      border-radius:5px; padding:4px 8px; font-size:12px; outline:none; font-family:inherit;
+    }
+    .fe-search:focus { border-color:#6c63ff; }
+    .fe-tbtn {
+      background:#22232e; border:1px solid #33344a; color:#888; border-radius:5px;
+      padding:4px 9px; font-size:11px; cursor:pointer; white-space:nowrap; flex-shrink:0;
+    }
+    .fe-tbtn:hover { color:#e0e0e0; border-color:#6c63ff; }
+    .fe-body { flex:1; display:flex; overflow:hidden; min-height:0; }
+    .fe-tree {
+      width:230px; flex-shrink:0; border-right:1px solid #2a2b38;
+      overflow-y:auto; padding:4px 0;
+    }
+    .fe-tree::-webkit-scrollbar { width:4px; }
+    .fe-tree::-webkit-scrollbar-thumb { background:#2e2f40; border-radius:2px; }
+    .fe-folder-hdr {
+      display:flex; align-items:center; gap:4px; padding:5px 8px 3px;
+      color:#555; font-size:10px; text-transform:uppercase; letter-spacing:.5px;
+      user-select:none; margin-top:4px;
+    }
+    .fe-folder-hdr:first-child { margin-top:0; }
+    .fe-file-row {
+      display:flex; align-items:center; gap:6px; padding:5px 8px 5px 20px;
+      cursor:pointer; font-size:12px; transition:background .1s; user-select:none;
+    }
+    .fe-file-row:hover { background:#22232e; }
+    .fe-file-row.fe-selected { background:#6c63ff22; color:#c4beff; }
+    .fe-file-icon { font-size:13px; flex-shrink:0; }
+    .fe-file-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .fe-detail {
+      flex:1; display:flex; flex-direction:column; padding:14px 16px;
+      gap:6px; overflow-y:auto; min-width:0;
+    }
+    .fe-detail::-webkit-scrollbar { width:4px; }
+    .fe-detail::-webkit-scrollbar-thumb { background:#2e2f40; border-radius:2px; }
+    .fe-empty { display:flex; align-items:center; justify-content:center; height:100%; color:#333; font-size:12px; text-align:center; line-height:1.8; }
+    .fe-detail-name { font-size:15px; font-weight:600; word-break:break-all; }
+    .fe-meta-grid { display:grid; grid-template-columns:70px 1fr; gap:4px 8px; font-size:12px; margin-top:4px; }
+    .fe-meta-lbl { color:#555; }
+    .fe-meta-val { color:#aaa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .fe-actions { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+    .fe-act {
+      width:100%; background:#22232e; border:1px solid #33344a; color:#aaa;
+      border-radius:6px; padding:7px 10px; font-size:12px; cursor:pointer; text-align:left;
+      transition:border-color .12s, color .12s;
+    }
+    .fe-act:hover { border-color:#6c63ff; color:#e0e0e0; }
+    .fe-act.fe-danger:hover { border-color:#ff4444; color:#ff6b6b; }
+    .fe-nf-form { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+    .fe-nf-label { font-size:11px; color:#888; margin-bottom:2px; }
+    .fe-statusbar {
+      padding:3px 10px; background:#13141b; border-top:1px solid #2a2b38;
+      font-size:10px; color:#444; flex-shrink:0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="launcher">
+  <h1>🤖 WinBox AI</h1>
+  <p>AI chat with slash-command database tools — powered by OpenRouter</p>
+  <button onclick="openChatWindow()">Open Chat</button>
+</div>
+
+<template id="chat-template">
+  <div id="chat-root">
+
+    <div id="chat-toolbar">
+      <!-- hidden state holders — keep in DOM for all existing read/write logic -->
+      <select id="model-select" style="display:none">
+        <optgroup label="Anthropic">
+          <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5</option>
+          <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
+          <option value="anthropic/claude-opus-4">Claude Opus 4</option>
+        </optgroup>
+        <optgroup label="OpenAI">
+          <option value="openai/gpt-4o">GPT-4o</option>
+          <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+        </optgroup>
+        <optgroup label="Google">
+          <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
+        </optgroup>
+        <optgroup label="Meta">
+          <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+        </optgroup>
+      </select>
+      <input id="api-key-input" type="password" style="display:none" placeholder="OpenRouter API key…" />
+
+      <button id="btn-models"      class="tb-btn" title="Browse & select AI model">⊞ Model</button>
+      <button id="btn-tools"       class="tb-btn" title="Toggle AI DB tool-use">⚙ Tools</button>
+      <button id="btn-agents"      class="tb-btn" title="Manage agent profiles">👤 Agents</button>
+      <button id="btn-tools-engine" class="tb-btn" title="Custom tools engine">⚒ Engine</button>
+      <button id="btn-files"       class="tb-btn" title="File Explorer — DB-backed files">🗂 Files</button>
+      <button id="btn-skills"      class="tb-btn" title="Manage AI skills">🧠 Skills</button>
+            <button id="btn-characters"  class="tb-btn" title="Manage roleplay character cards">🎭 Characters</button>
+      <button id="btn-editor"      class="tb-btn" title="Open text / code editor">📝 Editor</button>
+      <button id="btn-convos"      class="tb-btn" title="Manage conversations">💬 Convos</button>
+      <button id="btn-settings"    class="tb-btn" title="Settings — API key & model">⚙ Settings</button>
+      <div id="db-dot" title="DB: checking…"></div>
+      <button id="btn-clear" class="tb-btn" title="Clear conversation">🗑</button>
+    </div>
+
+    <div id="messages">
+      <div class="msg system">
+        <div class="bubble">Enter your OpenRouter API key, pick a model, and chat — or type <strong>/help</strong> for DB commands.</div>
+      </div>
+    </div>
+
+    <div id="status-bar">tokens: 0</div>
+
+    <div id="input-wrap">
+      <div id="cmd-hint"></div>
+      <div id="file-preview"></div>
+      <div id="input-area">
+        <input type="file" id="file-input" style="display:none" multiple
+          accept="image/*,text/*,.pdf,.csv,.json,.jsonl,.md,.py,.js,.ts,.jsx,.tsx,.html,.css,.yaml,.yml,.xml,.sql,.sh,.env" />
+        <button id="btn-upload" title="Attach image or file">📎</button>
+        <textarea id="user-input" rows="1" placeholder="Message or /command…"></textarea>
+        <button id="btn-send" title="Send">&#x27A4;</button>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script>
+/* ══════════════════════════════════════════════════════
+   COMMAND REGISTRY
+══════════════════════════════════════════════════════ */
+const COMMANDS = {
+  help:     { usage: '/help',               desc: 'Show available commands' },
+  models:   { usage: '/models',             desc: 'Browse and select an AI model' },
+  tables:   { usage: '/tables',             desc: 'List all DB tables' },
+  describe: { usage: '/describe <table>',   desc: 'Show table schema' },
+  rows:     { usage: '/rows <table> [n]',   desc: 'Preview table rows' },
+  sql:      { usage: '/sql [query]',        desc: 'Run SQL (opens editor if no query)' },
+  agent:    { usage: '/agent <task>',       desc: 'Run autonomous DB agent' },
+  connect:  { usage: '/connect',            desc: 'Show DB connection status' },
+  settings: { usage: '/settings',           desc: 'Edit API key & model' },
+  skills:   { usage: '/skills',             desc: 'Manage AI skills' },
+  characters: { usage: '/characters',        desc: 'Manage roleplay character cards' },
+    imagine:  { usage: '/imagine <prompt>',   desc: 'Generate an image from a prompt' },
+  auto_imagine: { usage: '/auto_imagine', desc: 'Auto-generate an image of the current scene' },
+  tools:    { usage: '/tools',              desc: 'Manage AI tools' },
+  clear:    { usage: '/clear',              desc: 'Clear conversation' },
+};
+
+const DESTRUCTIVE_TOOLS = new Set(['drop_table','truncate_table','delete_rows','drop_column']);
+const DESTRUCTIVE_SQL_RE = /\b(DROP|TRUNCATE|DELETE|ALTER|UPDATE|GRANT|REVOKE)\b/i;
+function isDestructiveSql(sql) {
+  return typeof sql === 'string' && DESTRUCTIVE_SQL_RE.test(sql);
+}
+
+const FILE_TOOLS = [
+  { type:'function', function:{ name:'fs_list_files',
+    description:'List all files in the persistent file store. Returns id, name, folder, language, size, dates.',
+    parameters:{ type:'object', properties:{
+      folder:{ type:'string', description:'Optional folder path filter, e.g. "/src"' }
+    }, required:[] }
+  }},
+  { type:'function', function:{ name:'fs_read_file',
+    description:'Read the full content of a stored file by name and folder.',
+    parameters:{ type:'object', properties:{
+      name:  { type:'string', description:'Filename, e.g. "utils.py"' },
+      folder:{ type:'string', description:'Folder path, default "/"' }
+    }, required:['name'] }
+  }},
+  { type:'function', function:{ name:'fs_write_file',
+    description:'Create or overwrite a file in the persistent store and open it in the editor. Use this when the user asks to save or write a file.',
+    parameters:{ type:'object', properties:{
+      name:    { type:'string', description:'Filename including extension' },
+      folder:  { type:'string', description:'Folder path, default "/"' },
+      content: { type:'string', description:'Full file content' },
+      language:{ type:'string', description:'Language mode', enum:['javascript','typescript','python','html','css','json','sql','bash','markdown','yaml','xml','plain'] }
+    }, required:['name','content'] }
+  }},
+  { type:'function', function:{ name:'fs_delete_file',
+    description:'Delete a file from the persistent store.',
+    parameters:{ type:'object', properties:{
+      name:  { type:'string', description:'Filename' },
+      folder:{ type:'string', description:'Folder path, default "/"' }
+    }, required:['name'] }
+  }},
+];
+
+const SKILL_READ_TOOL = {
+  type: 'function',
+  function: {
+    name: 'skill_read',
+    description: 'Load the full instructions and resources of an AI skill by name. Use this when a task matches a skill\'s description and you need its detailed guidance. Returns the skill\'s SKILL.md instructions and any bundled resource files.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'The skill name, e.g. "pdf-processing"' },
+      },
+      required: ['name'],
+    },
+  },
+};
+
+const CREATE_CUSTOM_TOOL = {
+  type: 'function',
+  function: {
+    name: 'create_custom_tool',
+    description: 'Create or update a custom AI tool (a Python function the AI can call). Use this when the user asks you to create a tool, function, or custom capability. Provide a snake_case name, a description of what it does and when to use it, a JSON-schema parameters object, and a Python function body that defines `def run(args): ...` and returns a JSON-serializable value.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name:        { type: 'string', description: 'snake_case function name, e.g. "get_weather"' },
+        description: { type: 'string', description: 'What the tool does and when to use it' },
+        parameters:  { type: 'object', description: 'JSON schema mapping parameter names to types, e.g. {"city": {"type": "string"}}' },
+        body:        { type: 'string', description: 'Python function body. Define `def run(args):` and return a JSON-serializable value, e.g. "def run(args):\\n    return f\\"The weather in {args[\\"city\\"]} is sunny\\""' },
+      },
+      required: ['name', 'description', 'body'],
+    },
+  },
+};
+
+const CREATE_SKILL_TOOL = {
+  type: 'function',
+  function: {
+    name: 'create_skill',
+    description: 'Create or update an AI skill in the skills store. Use this when the user asks you to create a skill, or to package domain expertise, workflows, or best practices for the AI to use automatically. Provide a lowercase-hyphen name, a description of what it does and when to use it, markdown instructions, and optional resource files.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name:         { type: 'string', description: 'lowercase letters, numbers, hyphens, e.g. "pdf-processing"' },
+        description:  { type: 'string', description: 'What the skill does and when to use it' },
+        instructions: { type: 'string', description: 'Markdown instructions (the SKILL.md body): workflows, best practices, step-by-step guidance' },
+        resources:    { type: 'array', items: { type: 'object' }, description: 'Optional array of {name, content} reference files' },
+      },
+      required: ['name', 'description', 'instructions'],
+    },
+  },
+};
+
+const EDITOR_TOOL = {
+  type: 'function',
+  function: {
+    name: 'open_editor',
+    description: 'Opens a text or code editor window and writes content into it. Use this whenever the user asks you to write a document, script, configuration file, or any block of code or text. The editor appears as a floating window the user can read, edit, copy, and save.',
+    parameters: {
+      type: 'object',
+      properties: {
+        filename: { type: 'string', description: 'Filename including extension, e.g. "script.py", "notes.md", "config.json"' },
+        content:  { type: 'string', description: 'The full text or code to write into the editor' },
+        language: {
+          type: 'string',
+          description: 'Language/format for the editor mode',
+          enum: ['javascript','typescript','python','html','css','json','sql','bash','markdown','yaml','xml','plain'],
+        },
+      },
+      required: ['filename', 'content'],
+    },
+  },
+};
+
+const GENERATE_IMAGE_TOOL = {
+  type: 'function',
+  function: {
+    name: 'generate_image',
+    description: 'Generate an image from a text prompt using the configured image-generation provider (e.g. Venice). Use this when the user asks you to create, draw, or generate an image, or when a roleplay scene would benefit from a visual. Returns the generated image and displays it in the chat.',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Detailed description of the image to generate' },
+        model:  { type: 'string', description: 'Image model id, e.g. "ideogram-v4" (defaults to provider default)' },
+        size:   { type: 'string', description: 'Image size, e.g. "1024x1024" (defaults to 1024x1024)' },
+      },
+      required: ['prompt'],
+    },
+  },
+};
+
+/* ══════════════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════════════ */
+let history          = [];
+const MAX_HISTORY   = 200; // cap messages sent to the model to bound request size
+let totalTokens      = 0;
+let streaming        = false;
+let toolsEnabled     = false;
+let dbTools          = [];
+let winInstance      = null;
+let chatDoc          = null;
+let pendingAttachments = [];
+let cmdHistoryArr = JSON.parse(localStorage.getItem('cmdHistory') || '[]');
+let cmdHistoryIdx = -1;
+
+// Server auth token (optional — only needed if the server runs with AUTH_TOKEN set).
+let authToken = localStorage.getItem('winboxai_auth_token') || '';
+
+// Inject the auth token into every /api/* request so callers don't each need to.
+const _origFetch = window.fetch;
+window.fetch = function (url, opts = {}) {
+  if (typeof url === 'string' && url.startsWith('/api/') && authToken) {
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers, { 'X-Auth-Token': authToken });
+  }
+  return _origFetch(url, opts);
+};
+
+// ── API provider presets ─────────────────────────────────────────────────────
+// Each entry is an OpenAI-compatible inference provider. The base URL is the
+// root the client calls <base>/chat/completions and <base>/models against.
+const API_PROVIDERS = [
+  { name: 'OpenRouter',  baseUrl: 'https://openrouter.ai/api/v1',        keyPlaceholder: 'sk-or-…' },
+  { name: 'Venice',      baseUrl: 'https://api.venice.ai/api/v1',        keyPlaceholder: 'sk-…' },
+  { name: 'Groq',        baseUrl: 'https://api.groq.com/openai/v1',      keyPlaceholder: 'gsk_…' },
+  { name: 'Together',    baseUrl: 'https://api.together.xyz/v1',         keyPlaceholder: '…' },
+  { name: 'Fireworks',   baseUrl: 'https://api.fireworks.ai/inference/v1', keyPlaceholder: '…' },
+  { name: 'Cerebras',    baseUrl: 'https://api.cerebras.ai/v1',          keyPlaceholder: '…' },
+  { name: 'Featherless', baseUrl: 'https://api.featherless.ai/v1',       keyPlaceholder: '…' },
+  { name: 'Custom',      baseUrl: '',                                     keyPlaceholder: '…' },
+];
+
+// Build <option> list for a provider <select>, marking `selectedName`.
+function providerOptions(selectedName) {
+  return API_PROVIDERS.map(p =>
+    `<option value="${escHtml(p.name)}" ${p.name === selectedName ? 'selected' : ''}>${escHtml(p.name)}</option>`
+  ).join('');
+}
+// Persisted provider selection + custom base URL.
+let apiProvider = localStorage.getItem('winboxai_provider') || 'OpenRouter';
+let apiBaseUrl  = localStorage.getItem('winboxai_base_url') || '';
+// Image generation has its own provider/key so chat and images can use
+// different providers (e.g. chat on OpenRouter, images on Venice).
+let imageProvider = localStorage.getItem('winboxai_image_provider') || 'Venice';
+let imageBaseUrl  = localStorage.getItem('winboxai_image_base_url') || '';
+let imageApiKey   = localStorage.getItem('winboxai_image_api_key') || '';
+// Image-generation model (used by /imagine and the generate_image tool).
+let imageModel  = localStorage.getItem('winboxai_image_model') || 'ideogram-v4';
+
+// Resolve the base URL / key for the IMAGE provider.
+function getImageApiBaseUrl() {
+  const p = API_PROVIDERS.find(x => x.name === imageProvider);
+  if (p && p.name !== 'Custom') return p.baseUrl;
+  return imageBaseUrl || 'https://api.venice.ai/api/v1';
+}
+function getImageApiKey() {
+  return (imageApiKey || chatDoc.apiKey.value).trim();
+}
+
+// Resolve the effective base URL for the current provider.
+function getApiBaseUrl() {
+  const p = API_PROVIDERS.find(x => x.name === apiProvider);
+  if (p && p.name !== 'Custom') return p.baseUrl;
+  return apiBaseUrl || 'https://openrouter.ai/api/v1';
+}
+// Resolve the key placeholder for the current provider.
+function getApiKeyPlaceholder() {
+  const p = API_PROVIDERS.find(x => x.name === apiProvider);
+  return (p && p.keyPlaceholder) || 'sk-…';
+}
+// Normalize a base URL so it has no trailing slash (for clean path joins).
+function normBaseUrl(u) { return (u || '').replace(/\/+$/, ''); }
+
+const openModals = new Map(); // id → WinBox instance
+let modalOffset  = 0;
+
+/* ══════════════════════════════════════════════════════
+   OPEN MAIN CHAT WINDOW
+══════════════════════════════════════════════════════ */
+function openChatWindow() {
+  if (winInstance) { winInstance.focus(); return; }
+
+  const tpl   = document.getElementById('chat-template');
+  const clone = tpl.content.cloneNode(true);
+  const root  = clone.querySelector('#chat-root');
+
+  const holder = document.createElement('div');
+  holder.style.display = 'none';
+  document.body.appendChild(holder);
+  holder.appendChild(root);
+
+  winInstance = new WinBox({
+    title: '🤖 AI Chat',
+    width: '500px', height: '620px',
+    x: 'center', y: 'center',
+    background: '#6c63ff',
+    border: 2,
+    onclose() {
+      winInstance = null; chatDoc = null;
+      document.body.removeChild(holder);
+    },
+    mount: root,
+  });
+
+  chatDoc = {
+    messages:    root.querySelector('#messages'),
+    modelSel:    root.querySelector('#model-select'),
+    apiKey:      root.querySelector('#api-key-input'),
+    input:       root.querySelector('#user-input'),
+    sendBtn:     root.querySelector('#btn-send'),
+    clearBtn:    root.querySelector('#btn-clear'),
+    modelsBtn:   root.querySelector('#btn-models'),
+    toolsBtn:    root.querySelector('#btn-tools'),
+    agentsBtn:   root.querySelector('#btn-agents'),
+    toolsEngBtn: root.querySelector('#btn-tools-engine'),
+    filesBtn:    root.querySelector('#btn-files'),
+    skillsBtn:   root.querySelector('#btn-skills'),
+    charactersBtn: root.querySelector('#btn-characters'),
+    editorBtn:   root.querySelector('#btn-editor'),
+    convosBtn:   root.querySelector('#btn-convos'),
+    settingsBtn: root.querySelector('#btn-settings'),
+    uploadBtn:   root.querySelector('#btn-upload'),
+    fileInput:   root.querySelector('#file-input'),
+    filePreview: root.querySelector('#file-preview'),
+    dbDot:       root.querySelector('#db-dot'),
+    statusBar:   root.querySelector('#status-bar'),
+    cmdHint:     root.querySelector('#cmd-hint'),
+    inputWrap:   root.querySelector('#input-wrap'),
+  };
+
+  wireEvents();
+  fetchDbTools();
+  loadSkillsMeta();
+  loadCustomTools();
+  checkDbStatus();
+  setInterval(checkDbStatus, 30000);
+}
+
+/* ══════════════════════════════════════════════════════
+   WIRE EVENTS
+══════════════════════════════════════════════════════ */
+function wireEvents() {
+  const { input, sendBtn, clearBtn, toolsBtn, modelsBtn } = chatDoc;
+
+  sendBtn.addEventListener('click', sendMessage);
+
+  input.addEventListener('keydown', e => {
+    // Command history navigation
+    if (e.key === 'ArrowUp') {
+      if (hintsVisible()) { e.preventDefault(); navigateHints(-1); return; }
+      if (input.value.startsWith('/')) { e.preventDefault(); navigateCmdHistory(1); return; }
+    }
+    if (e.key === 'ArrowDown') {
+      if (hintsVisible()) { e.preventDefault(); navigateHints(1); return; }
+      if (input.value.startsWith('/')) { e.preventDefault(); navigateCmdHistory(-1); return; }
+    }
+    if (e.key === 'Tab')    { e.preventDefault(); applyHintSelection(); return; }
+    if (e.key === 'Escape') { hideHints(); return; }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (hintsVisible()) { applyHintSelection(); return; }
+      sendMessage(); return;
+    }
+  });
+
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    updateHints(input.value);
+  });
+
+  clearBtn.addEventListener('click', cmdClear);
+  modelsBtn.addEventListener('click', openModelPicker);
+  chatDoc.agentsBtn.addEventListener('click', openAgentsModal);
+  chatDoc.toolsEngBtn.addEventListener('click', openToolsModal);
+  chatDoc.filesBtn.addEventListener('click', openFileExplorer);
+  chatDoc.skillsBtn.addEventListener('click', openSkillsModal);
+  chatDoc.charactersBtn.addEventListener('click', openCharactersModal);
+  chatDoc.editorBtn.addEventListener('click', () => openEditorWindow());
+  chatDoc.convosBtn.addEventListener('click', openConversationsModal);
+  chatDoc.settingsBtn.addEventListener('click', cmdSettings);
+
+  chatDoc.uploadBtn.addEventListener('click', () => chatDoc.fileInput.click());
+  chatDoc.fileInput.addEventListener('change', handleFileSelection);
+
+  toolsBtn.addEventListener('click', () => openToolsModal());
+
+  // Close hints on outside click
+  document.addEventListener('click', e => {
+    if (!chatDoc) return;
+    if (!chatDoc.cmdHint.contains(e.target) && e.target !== chatDoc.input) hideHints();
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   AUTOCOMPLETE HINTS
+══════════════════════════════════════════════════════ */
+function updateHints(val) {
+  const hint = chatDoc.cmdHint;
+  if (!val.startsWith('/') || val.includes(' ')) { hideHints(); return; }
+
+  const prefix = val.slice(1).toLowerCase();
+  const matches = Object.entries(COMMANDS).filter(([k]) => k.startsWith(prefix));
+
+  if (!matches.length || (matches.length === 1 && matches[0][0] === prefix)) {
+    hideHints(); return;
+  }
+
+  hint.innerHTML = '';
+  matches.forEach(([cmd, info], i) => {
+    const el = document.createElement('div');
+    el.className = 'hint-item' + (i === 0 ? ' selected' : '');
+    el.innerHTML = `<span class="hint-cmd">/${info.usage.split(' ').slice(1).length ? info.usage : cmd}</span><span class="hint-desc">${info.desc}</span>`;
+    el.addEventListener('mousedown', e => {
+      e.preventDefault();
+      chatDoc.input.value = '/' + cmd + (info.usage.includes('<') ? ' ' : '');
+      hideHints();
+      chatDoc.input.focus();
+    });
+    hint.appendChild(el);
+  });
+
+  // Position above the input area
+  const wrap = chatDoc.inputWrap;
+  const hintH = Math.min(matches.length * 34 + 8, 200);
+  hint.style.cssText = `display:block; bottom:${wrap.offsetHeight + 2}px; left:10px;`;
+}
+
+function hideHints() {
+  if (chatDoc) chatDoc.cmdHint.style.display = 'none';
+}
+
+function hintsVisible() {
+  const h = chatDoc?.cmdHint;
+  return h && h.style.display !== 'none' && !!h.querySelector('.hint-item');
+}
+
+function navigateHints(dir) {
+  const items = [...chatDoc.cmdHint.querySelectorAll('.hint-item')];
+  if (!items.length) return;
+  const cur = items.findIndex(el => el.classList.contains('selected'));
+  const next = (cur + dir + items.length) % items.length;
+  items.forEach((el, i) => el.classList.toggle('selected', i === next));
+  items[next].scrollIntoView({ block: 'nearest' });
+}
+
+function applyHintSelection() {
+  const sel = chatDoc.cmdHint.querySelector('.hint-item.selected');
+  if (sel) sel.dispatchEvent(new MouseEvent('mousedown'));
+}
+
+function navigateCmdHistory(dir) {
+  if (!cmdHistoryArr.length) return;
+  cmdHistoryIdx = Math.max(-1, Math.min(cmdHistoryArr.length - 1, cmdHistoryIdx + dir));
+  chatDoc.input.value = cmdHistoryIdx >= 0 ? cmdHistoryArr[cmdHistoryArr.length - 1 - cmdHistoryIdx] : '';
+}
+
+/* ══════════════════════════════════════════════════════
+   MESSAGE HELPERS
+══════════════════════════════════════════════════════ */
+function addSystemMsg(html) {
+  const el = document.createElement('div');
+  el.className = 'msg system';
+  el.innerHTML = `<div class="bubble">${html}</div>`;
+  chatDoc.messages.appendChild(el);
+  scrollBottom();
+}
+
+function addBubble(role, html) {
+  const emoji = role === 'user' ? '👤' : '🤖';
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  el.innerHTML = `<div class="avatar">${emoji}</div><div class="bubble">${html}</div>`;
+  chatDoc.messages.appendChild(el);
+  scrollBottom();
+  return el.querySelector('.bubble');
+}
+
+let toolCallSeq = 0; // monotonic counter so badge IDs are always unique
+function addToolCallBubble(name, args) {
+  const el = document.createElement('div');
+  el.className = 'msg tool-call';
+  const preview = JSON.stringify(args).slice(0, 120);
+  el.innerHTML = `
+    <div class="avatar">⚙</div>
+    <div class="bubble">
+      <div class="tc-name">${name}</div>
+      <div class="tc-args">${escHtml(preview)}${preview.length >= 120 ? '…' : ''}</div>
+      <div class="tc-badge" id="tcb-${name}-${++toolCallSeq}"></div>
+    </div>`;
+  chatDoc.messages.appendChild(el);
+  scrollBottom();
+  return el.querySelector('.tc-badge');
+}
+
+function addTypingIndicator() {
+  const el = document.createElement('div');
+  el.className = 'msg assistant';
+  el.id = 'typing-indicator';
+  el.innerHTML = `<div class="avatar">🤖</div><div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+  chatDoc.messages.appendChild(el);
+  scrollBottom();
+}
+
+function removeTypingIndicator() {
+  document.getElementById('typing-indicator')?.remove();
+}
+
+function scrollBottom() {
+  chatDoc.messages.scrollTop = chatDoc.messages.scrollHeight;
+}
+
+/* ══════════════════════════════════════════════════════
+   SEND MESSAGE / COMMAND ROUTER
+══════════════════════════════════════════════════════ */
+async function sendMessage() {
+  if (streaming) return;
+  hideHints();
+
+  const text = chatDoc.input.value.trim();
+  if (!text && !pendingAttachments.length) return;
+
+  chatDoc.input.value = '';
+  chatDoc.input.style.height = 'auto';
+  cmdHistoryIdx = -1;
+
+  if (text.startsWith('/')) {
+    pushCmdHistory(text);
+    return handleCommand(text);
+  }
+
+  const key   = chatDoc.apiKey.value.trim();
+  const model = chatDoc.modelSel.value;
+  if (!key) { addSystemMsg('⚠ Enter your OpenRouter API key — open ⚙ Settings.'); return; }
+
+  // Build bubble HTML (text + attachment chips)
+  const attachHtml = pendingAttachments.map(a =>
+      a.isImage
+        ? `<img class="chat-img" src="${a.data}" alt="${escHtml(a.name)}" title="${escHtml(a.name)}" />`
+        : `<span class="attach-label"> 📎 ${escHtml(a.name)}</span>`).join('');
+    addBubble('user', (text ? escHtml(text).replace(/\n/g,'<br>') : '') + attachHtml);
+
+  // Build history content — array when attachments present, string otherwise
+  if (pendingAttachments.length) {
+    const parts = [];
+    if (text) parts.push({ type: 'text', text });
+    for (const a of pendingAttachments) {
+      if (a.isImage) {
+        parts.push({ type: 'image_url', image_url: { url: a.data } });
+      } else {
+        parts.push({ type: 'text', text: `\n\n📎 **${a.name}**\n\`\`\`\n${a.data}\n\`\`\`` });
+      }
+    }
+    history.push({ role: 'user', content: parts });
+    pendingAttachments = [];
+    updateFilePreview();
+  } else {
+    history.push({ role: 'user', content: text });
+  }
+
+  streaming = true;
+  chatDoc.sendBtn.disabled = true;
+  addTypingIndicator();
+
+  try {
+    await runAiTurn(key, model);
+  } catch (e) {
+    addSystemMsg(`❌ ${escHtml(e.message || e)}`);
+  } finally {
+    streaming = false;
+    chatDoc.sendBtn.disabled = false;
+    removeTypingIndicator(); // always clear the ellipsis, even on error
+    scrollBottom();
+  }
+}
+
+function pushCmdHistory(text) {
+  cmdHistoryArr = cmdHistoryArr.filter(c => c !== text);
+  cmdHistoryArr.push(text);
+  if (cmdHistoryArr.length > 50) cmdHistoryArr.shift();
+  localStorage.setItem('cmdHistory', JSON.stringify(cmdHistoryArr));
+}
+
+/* ══════════════════════════════════════════════════════
+   AI TURN (supports tool-use loop)
+══════════════════════════════════════════════════════ */
+async function runAiTurn(key, model) {
+  let bubble    = null;
+  let fullText  = '';
+  let firstCall = true;
+  let iterations = 0;
+  const MAX_ITER = 25; // safety cap on the tool-call loop
+  let lastFeatherlessCall = ''; // "name(argsJSON)" of the previous round — guards duplicates
+  let featherlessNudged = false; // fires the JSON-lock nudge at most once per conversation
+
+  while (true) {
+    iterations++;
+    if (iterations > MAX_ITER) {
+      addSystemMsg(`⚠ Stopped after ${MAX_ITER} tool-call rounds (possible runaway loop).`);
+      break;
+    }
+    // Bound the request: keep the system message (if any) + the most recent messages.
+    const sysIdx = history.findIndex(m => m.role === 'system');
+    const sysMsg = sysIdx >= 0 ? history[sysIdx] : null;
+    const tail   = history.slice(sysIdx >= 0 ? sysIdx + 1 : 0);
+    const trimmed = tail.length > MAX_HISTORY ? tail.slice(-MAX_HISTORY) : tail;
+
+    // Level 1: inject available-skill metadata into the system prompt so the AI
+    // knows what skills exist and can trigger skill_read on demand.
+    let systemContent = sysMsg ? sysMsg.content : '';
+    // Inject the active character card (roleplay profile) ahead of everything.
+    if (activeCharacter) {
+      const ctxText = trimmed.map(m => (typeof m.content === 'string' ? m.content : '')).join(' ');
+      systemContent = buildCharacterSystemPrompt(activeCharacter, ctxText)
+        + (systemContent ? '\n\n' + systemContent : '');
+    }
+    if (skillsMeta.length) {
+      const skillList = skillsMeta.map(s => `- ${s.name}: ${s.description}`).join('\n');
+      const skillBlock = `\n\nAvailable AI skills (call skill_read with a skill's name to load its instructions when relevant):\n${skillList}`;
+      systemContent = (systemContent ? systemContent + skillBlock : 'You are a helpful assistant.' + skillBlock);
+    }
+
+    // ── Featherless: prompt-based tool calling (JSON mode) ──────────────────
+    // Featherless models don't reliably return native tool_calls deltas, so we
+    // describe the tools in the system prompt and ask for a strict JSON reply
+    // naming the function + arguments. The synthesized call then flows through
+    // the exact same dispatcher as the native path below.
+    let featherlessMode = false;
+    if (toolsEnabled && apiProvider === 'Featherless') {
+      const allTools = [EDITOR_TOOL, SKILL_READ_TOOL, CREATE_CUSTOM_TOOL, CREATE_SKILL_TOOL, GENERATE_IMAGE_TOOL, ...FILE_TOOLS, ...dbTools, ...buildCustomToolDefs()];
+      if (allTools.length) {
+        featherlessMode = true;
+        const toolDesc = allTools.map(t =>
+          `- ${t.function.name}: ${t.function.description || ''}\n  parameters: ${JSON.stringify(t.function.parameters || {})}`
+        ).join('\n');
+        systemContent =
+          (systemContent || 'You are a helpful assistant.') +
+          '\n\n# Tool calling protocol\n' +
+          'You have access to the following functions:\n' + toolDesc + '\n\n' +
+          '## How to call a function\n' +
+          'ONLY when you intend to CALL a function, respond with exactly one JSON object and nothing else:\n' +
+          '{"function": "<function_name>", "arguments": {<args object>}}\n' +
+          'No text before or after the JSON, no markdown fences.\n\n' +
+          '## After a function result\n' +
+          'Messages like [Function "name" result]: ... are RESULTS of functions you called. ' +
+          'When you see one, USE that result and answer the user in normal, conversational plain text. ' +
+          'NEVER output a JSON object as your final answer to the user — always answer in plain text sentences. ' +
+          'Do not call the same function again with identical arguments; reuse the result you already have.\n\n' +
+          '## When NOT to call a function\n' +
+          'For greetings, opinions, explanations, or anything a tool cannot help with, reply directly ' +
+          'in plain text. Do not output JSON in that case.';
+      }
+    }
+
+    let messages;
+    if (featherlessMode) {
+      // JSON-mode providers can't necessarily handle native tool_calls/tool
+      // role entries, so flatten prior rounds into plain text turns.
+      const flat = trimmed.map(m => {
+        if (m.role === 'tool') {
+          return { role: 'user', content: `(system note — result of your function call) Function "${m.__fnName || 'function'}" returned: ${m.content}\n(Use this result to answer the user in plain text. Do not repeat the function call.)` };
+        }
+        if (m.role === 'assistant' && m.tool_calls) {
+          const calls = m.tool_calls.map(tc => {
+            let a = {}; try { a = JSON.parse(tc.function.arguments); } catch {}
+            return `${tc.function.name}(${JSON.stringify(a)})`;
+          }).join('; ');
+          return { role: 'assistant', content: `I will call ${calls}.` };
+        }
+        return { role: m.role, content: m.content };
+      });
+      messages = systemContent
+        ? [{ role: 'system', content: systemContent }, ...flat]
+        : flat;
+    } else {
+      messages = systemContent
+        ? [{ role: 'system', content: systemContent }, ...trimmed]
+        : trimmed;
+    }
+
+    const body = {
+      model,
+      messages,
+      stream: !featherlessMode, // JSON-mode tool calls are non-streaming
+    };
+
+    // NOTE: no response_format in Featherless mode — json_object forces EVERY
+    // reply to be a JSON object, making plain-text answers impossible (the
+    // model emitted {"function": "", ...} instead of prose in live logs).
+    // The system prompt alone carries the call-if-needed protocol.
+    if (!featherlessMode && toolsEnabled) {
+      const allTools = [EDITOR_TOOL, SKILL_READ_TOOL, CREATE_CUSTOM_TOOL, CREATE_SKILL_TOOL, GENERATE_IMAGE_TOOL, ...FILE_TOOLS, ...dbTools, ...buildCustomToolDefs()];
+      if (allTools.length) { body.tools = allTools; body.tool_choice = 'auto'; }
+    }
+
+    const response = await fetch('/api/chat', {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...body, apiKey: key, baseUrl: normBaseUrl(getApiBaseUrl()) }),
+            });
+
+    if (!response.ok) {
+          const raw = await response.text().catch(() => '');
+          let msg = '';
+          try {
+            const j = JSON.parse(raw);
+            msg = j?.error?.message || j?.error || (typeof j === 'string' ? j : '');
+          } catch { msg = raw; }
+          throw new Error(msg || `HTTP ${response.status}`);
+        }
+
+    removeTypingIndicator(); // always remove — tool-call loops re-add it
+    firstCall = false;
+
+    let pendingToolCalls = []; // accumulate streamed tool call deltas
+    let finishReason = null;
+    let assistantMsg = { role: 'assistant', content: '' };
+
+    if (featherlessMode) {
+      // Non-streaming JSON-mode turn: read the full body, parse the reply, and
+      // either synthesize a tool call or treat the content as normal text.
+      const dataF = await response.json();
+      if (dataF.usage) {
+        totalTokens += dataF.usage.total_tokens || 0;
+        chatDoc.statusBar.textContent = `tokens: ${totalTokens.toLocaleString()}`;
+      }
+      // Some Featherless models return the reply in `reasoning` or
+      // `reasoning_content` with empty `content`; fall back so we don't
+      // report an empty response.
+      const msgF  = dataF.choices?.[0]?.message || {};
+      const content = msgF.content || msgF.reasoning || msgF.reasoning_content || '';
+      if (!content) console.warn('[Featherless] empty reply:', JSON.stringify(dataF).slice(0, 800));
+
+      // Lenient parse: strip code fences, then grab the first {...} block.
+      let parsedF = null;
+      try { parsedF = JSON.parse(content.trim()); } catch (_) {
+        const cleaned = content.replace(/```(?:json)?/g, '');
+        const mF = cleaned.match(/\{[\s\S]*\}/);
+        if (mF) { try { parsedF = JSON.parse(mF[0]); } catch (_) {} }
+      }
+
+      const callSig = parsedF && parsedF.function
+        ? `${parsedF.function}(${JSON.stringify(parsedF.arguments ?? {})})` : '';
+
+      // JSON lock-in: model replied with a JSON object that is NOT a usable
+      // function call — either no "function" key or an empty function name
+      // (e.g. {"function": "", "arguments": {}}). Nudge it to plain text.
+      if (parsedF && typeof parsedF === 'object' && !Array.isArray(parsedF)
+          && !(typeof parsedF.function === 'string' && parsedF.function.trim())
+          && !featherlessNudged) {
+        featherlessNudged = true;
+        addSystemMsg('⚠ Model replied with a JSON object instead of plain text; asking it to answer normally.');
+        history.push({ role: 'user', content: '(system) Your last reply was a raw JSON object. That is only allowed when CALLING a function. Answer the user in normal conversational plain text now — no JSON.' });
+        continue;
+      }
+
+      if (parsedF && typeof parsedF.function === 'string' && parsedF.function && callSig === lastFeatherlessCall) {
+        // Model repeated the exact same call — refuse it and demand a plain answer.
+        addSystemMsg('⚠ Repeated identical function call blocked; asking the model to answer from the result.');
+        history.push({ role: 'user', content: '(system) You already called that exact function and its result is in this conversation. Do NOT call it again. Answer the user\'s original question now in plain text — no JSON.' });
+        lastFeatherlessCall = '';
+        continue; // next round with the refusal in context
+      }
+
+      if (parsedF && typeof parsedF.function === 'string' && parsedF.function) {
+        const fargs = (parsedF.arguments && typeof parsedF.arguments === 'object') ? parsedF.arguments : {};
+        lastFeatherlessCall = callSig;
+        pendingToolCalls = [{
+          id: `call_${Math.random().toString(36).slice(2)}`,
+          function: { name: parsedF.function, arguments: JSON.stringify(fargs) },
+        }];
+        finishReason = 'tool_calls';
+      } else if (content) {
+        bubble   = addBubble('assistant', '');
+        fullText = content;
+        bubble.innerHTML = renderMarkdown(fullText);
+        scrollBottom();
+      }
+      // fullText is pushed to history by the shared "Normal text finish" below.
+    } else {
+    // Stream and collect chunks
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let   buf     = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t || t === 'data: [DONE]') continue;
+        if (!t.startsWith('data: ')) continue;
+
+        let json;
+        try { json = JSON.parse(t.slice(6)); } catch { continue; }
+
+        const choice = json.choices?.[0];
+        if (!choice) continue;
+
+        finishReason = choice.finish_reason || finishReason;
+        const delta  = choice.delta || {};
+
+        // Accumulate tool call deltas
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            if (!pendingToolCalls[idx]) {
+              pendingToolCalls[idx] = { id: '', function: { name: '', arguments: '' } };
+            }
+            if (tc.id)                pendingToolCalls[idx].id = tc.id;
+            if (tc.function?.name)    pendingToolCalls[idx].function.name    += tc.function.name;
+            if (tc.function?.arguments) pendingToolCalls[idx].function.arguments += tc.function.arguments;
+          }
+        }
+
+        // Stream text content
+        if (delta.content) {
+                  fullText += delta.content;
+                  if (!bubble) bubble = addBubble('assistant', '');
+                  bubble.innerHTML = renderMarkdown(fullText);
+                  scrollBottom();
+                }
+
+        if (json.usage) {
+          totalTokens += json.usage.total_tokens || 0;
+          chatDoc.statusBar.textContent = `tokens: ${totalTokens.toLocaleString()}`;
+        }
+      }
+    }
+    }
+
+    // ── Handle tool calls ───────────────────────────
+    if (pendingToolCalls.length && (finishReason === 'tool_calls' || pendingToolCalls.some(t => t.function.name))) {
+      // Push assistant message with tool_calls
+      assistantMsg.tool_calls = pendingToolCalls.map(tc => ({
+        id: tc.id || `call_${Math.random().toString(36).slice(2)}`,
+        type: 'function',
+        function: { name: tc.function.name, arguments: tc.function.arguments },
+      }));
+      history.push(assistantMsg);
+
+      for (const tc of assistantMsg.tool_calls) {
+        const name = tc.function.name;
+        let args = {};
+        try { args = JSON.parse(tc.function.arguments); } catch {}
+
+        // Confirmation for destructive ops (tools + destructive raw SQL)
+        const isDestructive = DESTRUCTIVE_TOOLS.has(name)
+          || (name === 'execute_sql' && isDestructiveSql(args.sql));
+        if (isDestructive) {
+          const confirmed = await confirmModal(
+            `Destructive operation: <strong>${name}</strong><br>Args: ${escHtml(JSON.stringify(args))}`,
+            'Run anyway'
+          );
+          if (!confirmed) {
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: 'User cancelled this operation.' });
+            continue;
+          }
+          args.confirm = true; // required by the server guard
+        }
+
+        const badge = addToolCallBubble(name, args);
+
+        // Built-in: file system tools
+        if (name.startsWith('fs_')) {
+          let toolResult;
+          try {
+            if (name === 'fs_list_files') {
+              const url = '/api/files' + (args.folder ? `?folder=${encodeURIComponent(args.folder)}` : '');
+              toolResult = await fetch(url).then(r => r.json());
+            } else if (name === 'fs_read_file') {
+              const list = await fetch('/api/files').then(r => r.json());
+              const f = list.find(x => x.name === args.name && x.folder === (args.folder || '/'));
+              if (!f) throw new Error(`File "${args.name}" not found`);
+              toolResult = await fetch(`/api/files/${f.id}`).then(r => r.json());
+            } else if (name === 'fs_write_file') {
+              const saved = await fetch('/api/files', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: args.name, folder: args.folder || '/', content: args.content, language: args.language || 'plain' }),
+              }).then(r => r.json());
+              if (saved.error) throw new Error(saved.error);
+              openEditorWindow({ filename: args.name, content: args.content, language: args.language, fileRef: { id: saved.id, name: saved.name, folder: saved.folder } });
+              toolResult = { saved: true, id: saved.id, message: `"${args.name}" saved and opened in editor.` };
+            } else if (name === 'fs_delete_file') {
+              const list = await fetch('/api/files').then(r => r.json());
+              const f = list.find(x => x.name === args.name && x.folder === (args.folder || '/'));
+              if (!f) throw new Error(`File "${args.name}" not found`);
+              await fetch(`/api/files/${f.id}`, { method: 'DELETE' });
+              toolResult = { deleted: true, message: `"${args.name}" deleted.` };
+            }
+            badge.textContent = '✓ OK'; badge.className = 'tc-badge ok';
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: JSON.stringify(toolResult) });
+          } catch (e) {
+            badge.textContent = '✗ ERROR'; badge.className = 'tc-badge err'; badge.title = e.message;
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Error: ${e.message}` });
+          }
+          continue;
+        }
+
+        // Built-in: editor
+        if (name === 'open_editor') {
+          openEditorWindow({
+            filename: args.filename || 'untitled.txt',
+            content:  args.content  || '',
+            language: args.language || '',
+          });
+          badge.textContent = '✓ Opened'; badge.className = 'tc-badge ok';
+          history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Editor opened: "${args.filename || 'untitled.txt'}"` });
+          continue;
+        }
+
+        // Built-in: generate_image — call the provider's image-generation endpoint
+                if (name === 'generate_image') {
+                  try {
+                    const rr = await fetch('/api/generate-image', {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                                      prompt: args.prompt,
+                                      apiKey: getImageApiKey(), key,
+                                      baseUrl: normBaseUrl(getImageApiBaseUrl()),
+                                      model: args.model || imageModel,
+                                      size: args.size,
+                                    }),
+                    }).then(r => r.json()).catch(e => ({ error: e.message }));
+                    if (rr.error) throw new Error(rr.error);
+                    // Render the generated image in the chat.
+                    addBubble('assistant', `<img class="chat-img" src="${rr.image}" alt="generated image" />`);
+                    badge.textContent = '✓ Image'; badge.className = 'tc-badge ok';
+                    history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: 'Generated image.' });
+                  } catch (e) {
+                    badge.textContent = '✗ ERROR'; badge.className = 'tc-badge err'; badge.title = e.message;
+                    history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Error: ${e.message}` });
+                  }
+                  continue;
+                }
+
+                // Built-in: skill_read — load a skill's instructions + resources on demand
+        if (name === 'skill_read') {
+          try {
+            const list = await fetch('/api/skills').then(r => r.json());
+            const s = list.find(x => x.name === args.name);
+            if (!s) throw new Error(`Skill "${args.name}" not found`);
+            const full = await fetch(`/api/skills/${s.id}`).then(r => r.json());
+            const resText = (full.resources || []).map(r =>
+              `--- ${r.name} ---\n${r.content}`).join('\n\n');
+            const content = `# Skill: ${full.name}\n\n## Description\n${full.description}\n\n## Instructions\n${full.instructions}\n\n${resText ? '## Resources\n' + resText : ''}`;
+            badge.textContent = '✓ Loaded'; badge.className = 'tc-badge ok';
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content });
+          } catch (e) {
+            badge.textContent = '✗ ERROR'; badge.className = 'tc-badge err'; badge.title = e.message;
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Error: ${e.message}` });
+          }
+          continue;
+        }
+
+        // Built-in: create_custom_tool — save a custom tool to localStorage
+        if (name === 'create_custom_tool') {
+          try {
+            const tname = String(args.name || '').trim();
+            if (!/^[a-z][a-z0-9_]*$/.test(tname)) throw new Error('Name must be snake_case (a-z, 0-9, _).');
+            if (!args.body) throw new Error('body is required.');
+            const tool = {
+              name: tname,
+              description: String(args.description || ''),
+              parameters: (args.parameters && typeof args.parameters === 'object') ? args.parameters : {},
+              body: String(args.body),
+              language: 'python',
+            };
+            const list = getCustomTools();
+            const existing = list.findIndex(t => t.name === tname);
+            if (existing >= 0) list[existing] = tool; else list.push(tool);
+            saveCustomTools(list);
+            badge.textContent = '✓ Saved'; badge.className = 'tc-badge ok';
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Custom tool "${tname}" created/updated. It is now available for the AI to call.` });
+          } catch (e) {
+            badge.textContent = '✗ ERROR'; badge.className = 'tc-badge err'; badge.title = e.message;
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Error: ${e.message}` });
+          }
+          continue;
+        }
+
+        // Built-in: create_skill — save a skill to the skills store
+        if (name === 'create_skill') {
+          try {
+            const sname = String(args.name || '').trim();
+            if (!/^[a-z][a-z0-9-]*$/.test(sname)) throw new Error('Name must be lowercase letters, numbers, hyphens.');
+            if (!args.instructions) throw new Error('instructions is required.');
+            const payload = {
+              name: sname,
+              description: String(args.description || ''),
+              instructions: String(args.instructions),
+              resources: Array.isArray(args.resources) ? args.resources : [],
+            };
+            const list = await fetch('/api/skills').then(r => r.json());
+            const existing = list.find(s => s.name === sname);
+            const res = existing
+              ? await fetch(`/api/skills/${existing.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+              : await fetch('/api/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
+            await loadSkillsMeta();
+            badge.textContent = '✓ Saved'; badge.className = 'tc-badge ok';
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Skill "${sname}" created/updated. It is now available and its metadata is in the system prompt.` });
+          } catch (e) {
+            badge.textContent = '✗ ERROR'; badge.className = 'tc-badge err'; badge.title = e.message;
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Error: ${e.message}` });
+          }
+          continue;
+        }
+
+        // Execute custom tools server-side (Python run(args) bodies)
+        const customTool = getCustomTools().find(ct => ct.name === name);
+        if (customTool) {
+          try {
+            const rr = await fetch('/api/run-tool', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, args }),
+            }).then(r => r.json()).catch(e => ({ success: false, error: e.message }));
+            if (!rr.success) throw new Error(rr.error || 'Tool failed');
+            badge.textContent = '✓ OK'; badge.className = 'tc-badge ok';
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: JSON.stringify(rr.result) });
+          } catch (e) {
+            badge.textContent = '✗ ERROR'; badge.className = 'tc-badge err'; badge.title = e.message;
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Error: ${e.message}` });
+          }
+          continue;
+        }
+
+        const res = await fetch('/api/db', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tool: name, args }),
+        }).then(r => r.json()).catch(e => ({ success: false, error: e.message }));
+
+        badge.textContent = res.success ? '✓ OK' : '✗ ERROR';
+        badge.className   = 'tc-badge ' + (res.success ? 'ok' : 'err');
+        if (!res.success) badge.title = res.error;
+
+        const resultStr = res.success
+          ? JSON.stringify(res.result, null, 0)
+          : `ERROR: ${res.error}`;
+        history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: resultStr });
+      }
+
+      // Loop for next AI turn
+      bubble = null; fullText = ''; pendingToolCalls = [];
+      addTypingIndicator(); firstCall = false;
+      continue;
+    }
+
+    // ── Normal text finish ───────────────────────────
+    if (fullText) {
+      history.push({ role: 'assistant', content: fullText });
+    } else if (!pendingToolCalls.length) {
+      addSystemMsg('*(empty response)*');
+    }
+    break;
+  }
+}
+
+/* ══════════════════════════════════════════════════════
+   COMMAND HANDLERS
+══════════════════════════════════════════════════════ */
+function handleCommand(text) {
+  const parts = text.slice(1).trim().split(/\s+/);
+  const cmd   = parts[0].toLowerCase();
+  const arg   = parts.slice(1).join(' ').trim();
+
+  switch (cmd) {
+    case 'help':     return cmdHelp();
+    case 'models':   return openModelPicker();
+    case 'tables':   return cmdTables();
+    case 'describe': return arg ? cmdDescribe(arg) : addSystemMsg('Usage: /describe &lt;table&gt;');
+    case 'rows':     return cmdRows(parts[1], parseInt(parts[2]) || 50);
+    case 'sql':      return arg ? cmdSqlRun(arg) : cmdSqlModal();
+    case 'agent':    return arg ? cmdAgent(arg) : cmdAgentModal();
+    case 'connect':  return cmdConnect();
+    case 'settings': return cmdSettings();
+    case 'skills':   return openSkillsModal();
+    case 'characters': return openCharactersModal();
+    case 'imagine':  return arg ? cmdImagine(arg) : addSystemMsg('Usage: /imagine &lt;prompt&gt;');
+    case 'auto_imagine': return cmdAutoImagine();
+    case 'tools':    return openToolsModal();
+    case 'clear':    return cmdClear();
+    default:         addSystemMsg(`Unknown command: <strong>/${cmd}</strong> — type /help for the list.`);
+  }
+}
+
+function cmdHelp() {
+  const rows = Object.entries(COMMANDS)
+    .map(([,info]) => `<tr><td>${escHtml(info.usage)}</td><td>${info.desc}</td></tr>`)
+    .join('');
+  openModal({
+    id: 'help', title: '📋 Commands',
+    width: '420px', height: '480px',
+    content: `<table class="help-table"><tbody>${rows}</tbody></table>`,
+  });
+}
+
+async function cmdTables() {
+  addSystemMsg('Fetching tables…');
+  const res = await dbCall('list_tables', {});
+  if (!res.success) return addSystemMsg(`❌ ${escHtml(res.error)}`);
+  const tables = res.result?.tables || [];
+  if (!tables.length) return addSystemMsg('Database has no tables yet.');
+  const rows = tables.map(t =>
+    `<tr><td>${escHtml(t)}</td><td><button class="btn-secondary" style="padding:2px 8px;font-size:11px" onclick="cmdDescribe('${escHtml(t)}')">schema</button> <button class="btn-secondary" style="padding:2px 8px;font-size:11px" onclick="cmdRows('${escHtml(t)}')">rows</button></td></tr>`
+  ).join('');
+  openModal({
+    id: 'tables', title: `🗃 Tables (${tables.length})`,
+    width: '360px', height: '300px',
+    content: `<table class="data-table"><thead><tr><th>Table</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`,
+  });
+}
+
+async function cmdDescribe(table) {
+  addSystemMsg(`Describing <strong>${escHtml(table)}</strong>…`);
+  const res = await dbCall('describe_table', { table_name: table });
+  if (!res.success) return addSystemMsg(`❌ ${escHtml(res.error)}`);
+  const cols = Array.isArray(res.result) ? res.result : [];
+  if (!cols.length) return addSystemMsg(`Table <strong>${escHtml(table)}</strong> not found.`);
+  const rows = cols.map(c => `
+    <tr>
+      <td>${escHtml(c.column_name)}</td>
+      <td>${escHtml(c.data_type)}${c.character_maximum_length ? `(${c.character_maximum_length})` : ''}</td>
+      <td>${c.is_nullable === 'NO' ? '<span style="color:#ff6b6b">NOT NULL</span>' : 'YES'}</td>
+      <td>${escHtml(c.column_default || '')}</td>
+    </tr>`).join('');
+  openModal({
+    id: `desc-${table}`, title: `📐 ${table}`,
+    width: '500px', height: '360px',
+    content: `<div class="data-table-wrap"><table class="data-table">
+      <thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`,
+  });
+}
+
+async function cmdRows(table, limit = 50) {
+  if (!table) return addSystemMsg('Usage: /rows &lt;table&gt; [limit]');
+  addSystemMsg(`Loading <strong>${escHtml(table)}</strong> rows…`);
+  const res = await dbCall('select_rows', { table_name: table, limit });
+  if (!res.success) return addSystemMsg(`❌ ${escHtml(res.error)}`);
+  const rows = res.result?.rows || [];
+  if (!rows.length) return addSystemMsg(`Table <strong>${escHtml(table)}</strong> is empty.`);
+  const cols = Object.keys(rows[0]);
+  const hdr  = cols.map(c => `<th>${escHtml(c)}</th>`).join('');
+  const body = rows.map(r =>
+    `<tr>${cols.map(c => `<td>${escHtml(String(r[c] ?? ''))}</td>`).join('')}</tr>`
+  ).join('');
+  const count = res.result?.count ?? rows.length;
+  openModal({
+    id: `rows-${table}`, title: `📊 ${table} (${count} rows)`,
+    width: '640px', height: '420px',
+    content: `<div class="data-table-wrap"><table class="data-table">
+      <thead><tr>${hdr}</tr></thead><tbody>${body}</tbody></table></div>`,
+  });
+}
+
+function cmdSqlModal() {
+  openFormModal({
+    id: 'sql-editor', title: '🔍 SQL Editor',
+    width: '560px', height: '300px',
+    fields: [{ name: 'sql', label: 'SQL Query', type: 'textarea', placeholder: "SELECT * FROM users WHERE …" }],
+    submitLabel: 'Run',
+    onSubmit: ({ sql }) => { if (sql.trim()) cmdSqlRun(sql.trim()); },
+  });
+}
+
+async function cmdSqlRun(sql) {
+  const destructive = isDestructiveSql(sql);
+  if (destructive) {
+    const confirmed = await confirmModal(
+      `Destructive SQL:<br><code>${escHtml(sql)}</code>`,
+      'Run anyway'
+    );
+    if (!confirmed) return addSystemMsg('SQL cancelled.');
+  }
+  addSystemMsg(`Running SQL…`);
+  const res = await dbCall('execute_sql', { sql, confirm: destructive });
+  if (!res.success) return addSystemMsg(`❌ SQL error: ${escHtml(res.error)}`);
+  const { rows = [], rowCount = 0 } = res.result;
+  if (!rows.length) return addSystemMsg(`✓ Query OK — ${rowCount} row(s) affected.`);
+  const cols = Object.keys(rows[0]);
+  const hdr  = cols.map(c => `<th>${escHtml(c)}</th>`).join('');
+  const body = rows.map(r =>
+    `<tr>${cols.map(c => `<td>${escHtml(String(r[c] ?? ''))}</td>`).join('')}</tr>`
+  ).join('');
+  openModal({
+    id: `sql-result-${Date.now()}`, title: `🔍 Result (${rows.length} rows)`,
+    width: '640px', height: '400px',
+    content: `<div class="data-table-wrap"><table class="data-table">
+      <thead><tr>${hdr}</tr></thead><tbody>${body}</tbody></table></div>`,
+  });
+}
+
+function cmdAgentModal() {
+  openFormModal({
+    id: 'agent-task', title: '🤖 DB Agent Task',
+    width: '500px', height: '260px',
+    fields: [{ name: 'task', label: 'Task description', type: 'textarea',
+               placeholder: 'Create a products table, insert 5 items, then show items priced over $10…' }],
+    submitLabel: 'Run Agent',
+    onSubmit: ({ task }) => { if (task.trim()) cmdAgent(task.trim()); },
+  });
+}
+
+async function cmdAgent(task) {
+  const key   = chatDoc.apiKey.value.trim();
+  const model = chatDoc.modelSel.value;
+  if (!key) return addSystemMsg('⚠ Enter your OpenRouter API key first.');
+
+  const { logEl, win } = openLogModal(`🤖 Agent: ${task.slice(0, 40)}${task.length > 40 ? '…' : ''}`);
+  const append = (cls, text) => {
+    const span = document.createElement('span');
+    span.className = cls;
+    span.textContent = text + '\n';
+    logEl.appendChild(span);
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+
+  append('', `Task: ${task}\n${'─'.repeat(50)}`);
+
+  try {
+    const response = await fetch('/api/agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task, apiKey: key, model, baseUrl: normBaseUrl(getApiBaseUrl()) }),
+    });
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let   buf     = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t.startsWith('data:')) continue;
+        let evt;
+        try { evt = JSON.parse(t.slice(5).trim()); } catch { continue; }
+
+        if (evt.type === 'tool_call') {
+          const argStr = JSON.stringify(evt.args || {}).slice(0, 80);
+          append('log-tool', `  → ${evt.name}(${argStr}${argStr.length >= 80 ? '…' : ''})`);
+        } else if (evt.type === 'tool_result') {
+          const cls = evt.success ? 'log-ok' : 'log-err';
+          append(cls, `     [${evt.success ? 'OK' : 'ERR'}] ${(evt.result || evt.error || '').slice(0, 200)}`);
+        } else if (evt.type === 'done') {
+          append('log-done', `\n✓ Done\n${evt.summary}`);
+          addSystemMsg(`🤖 Agent finished: ${escHtml(evt.summary)}`);
+        } else if (evt.type === 'error') {
+          append('log-err', `\n✗ Error: ${evt.message}`);
+          addSystemMsg(`❌ Agent error: ${escHtml(evt.message)}`);
+        }
+      }
+    }
+  } catch (e) {
+    append('log-err', `\nFetch error: ${e.message}`);
+  }
+}
+
+async function cmdConnect() {
+  const res = await fetch('/api/status').then(r => r.json()).catch(() => ({ connected: false, error: 'Server unreachable' }));
+  openModal({
+    id: 'connect', title: '🔌 DB Connection',
+    width: '380px', height: '200px',
+    content: res.connected
+      ? `<p style="color:#23c7a8;font-weight:600;margin-bottom:8px">● Connected</p><p style="color:#888;font-size:12px;word-break:break-all">${escHtml(res.dbUrl)}</p>`
+      : `<p style="color:#ff6b6b;font-weight:600;margin-bottom:8px">● Disconnected</p><p style="color:#888;font-size:12px">${escHtml(res.error || '')}</p>`,
+  });
+}
+
+async function cmdSettings() {
+  const key   = chatDoc.apiKey.value;
+  const model = chatDoc.modelSel.value;
+  const provOpts = providerOptions(apiProvider);
+  const imgProvOpts = providerOptions(imageProvider);
+  // Prefill the Database URL field from the server (masked only in /api/status,
+  // so we fetch the real value here; the field is password-type anyway).
+  let dbConfigUrl = '';
+  try {
+    const cfg = await fetch('/api/db-config').then(r => r.json());
+    dbConfigUrl = (cfg && cfg.dbUrl) || '';
+  } catch (_) { /* leave blank if server unreachable */ }
+  openModal({
+    id: 'settings', title: '⚙ Settings',
+    width: '420px', height: '480px',
+    content: `
+      <label>API Provider</label>
+      <select id="s-provider">
+        ${provOpts}
+      </select>
+      <label style="margin-top:14px">API Key</label>
+      <input type="password" id="s-key" value="${escHtml(key)}" placeholder="${escHtml(getApiKeyPlaceholder())}" />
+      <label style="margin-top:14px">Base URL (for Custom provider)</label>
+      <input type="text" id="s-base" value="${escHtml(apiBaseUrl)}" placeholder="https://api.example.com/v1" />
+      <label style="margin-top:14px">Model</label>
+      <select id="s-model">
+              ${Array.from(chatDoc.modelSel.options).map(o =>
+                `<option value="${escHtml(o.value)}" ${o.value===model?'selected':''}>${escHtml(o.text)}</option>`
+              ).join('')}
+            </select>
+                        <label style="margin-top:14px">Image Model (for /imagine & generate_image)</label>
+                        <input type="text" id="s-imgmodel" value="${escHtml(imageModel)}" placeholder="ideogram-v4" />
+                        <label style="margin-top:14px">Image Provider</label>
+                        <select id="s-imgprovider">${imgProvOpts}</select>
+                        <label style="margin-top:14px">Image API Key (blank = same as chat key)</label>
+                        <input type="password" id="s-imgkey" value="${escHtml(imageApiKey)}" placeholder="(use chat API key)" />
+                        <label style="margin-top:14px">Image Base URL (for Custom provider)</label>
+                        <input type="text" id="s-imgbase" value="${escHtml(imageBaseUrl)}" placeholder="https://api.venice.ai/api/v1" />
+                        <label style="margin-top:14px">Database URL (Postgres server)</label>
+                        <input type="password" id="s-dburl" value="${escHtml(dbConfigUrl)}" placeholder="postgresql://user:pass@host:5432/db" />
+                        <label style="margin-top:14px">Server Auth Token (optional)</label>
+                        <input type="password" id="s-auth" value="${escHtml(authToken)}" placeholder="AUTH_TOKEN if set on server" />`,
+    footer: `<button class="btn-primary" onclick="applySettings()">Save</button>
+             <button class="btn-secondary" onclick="openModals.get('settings')?.close()">Cancel</button>`,
+  });
+  // When the provider changes, update the key placeholder and toggle the base URL field.
+  const provSel = document.getElementById('s-provider');
+  const baseEl  = document.getElementById('s-base');
+  const keyEl   = document.getElementById('s-key');
+  const imgProvSel = document.getElementById('s-imgprovider');
+  const imgBaseEl  = document.getElementById('s-imgbase');
+  const syncBaseVis = (sel, baseInput) => {
+    const p = API_PROVIDERS.find(x => x.name === sel.value);
+    baseInput.style.display = (p && p.name === 'Custom') ? '' : 'none';
+  };
+  const syncProv = () => {
+    const p = API_PROVIDERS.find(x => x.name === provSel.value);
+    keyEl.placeholder = (p && p.keyPlaceholder) || 'sk-…';
+    syncBaseVis(provSel, baseEl);
+  };
+  const syncImgProv = () => syncBaseVis(imgProvSel, imgBaseEl);
+  provSel.addEventListener('change', syncProv);
+  imgProvSel.addEventListener('change', syncImgProv);
+  syncProv(); syncImgProv();
+}
+
+function applySettings() {
+  const p = document.getElementById('s-provider')?.value;
+  const k = document.getElementById('s-key')?.value.trim();
+  const b = document.getElementById('s-base')?.value.trim();
+  const m = document.getElementById('s-model')?.value;
+  const im = document.getElementById('s-imgmodel')?.value.trim();
+  const a = document.getElementById('s-auth')?.value.trim();
+  const ip = document.getElementById('s-imgprovider')?.value;
+  const ik = document.getElementById('s-imgkey')?.value.trim();
+  const ib = document.getElementById('s-imgbase')?.value.trim();
+  const du = document.getElementById('s-dburl')?.value.trim();
+  if (ip) { imageProvider = ip; localStorage.setItem('winboxai_image_provider', ip); }
+  if (ib !== undefined) { imageBaseUrl = ib; localStorage.setItem('winboxai_image_base_url', ib); }
+  if (ik !== undefined) { imageApiKey = ik; localStorage.setItem('winboxai_image_api_key', ik); }
+  if (p) { apiProvider = p; localStorage.setItem('winboxai_provider', p); }
+  if (b !== undefined) { apiBaseUrl = b; localStorage.setItem('winboxai_base_url', b); }
+  if (im) { imageModel = im; localStorage.setItem('winboxai_image_model', im); }
+  if (k) chatDoc.apiKey.value = k;
+  if (m) chatDoc.modelSel.value = m;
+  if (a !== undefined) { authToken = a; localStorage.setItem('winboxai_auth_token', a); }
+  // Push a new Postgres endpoint to the server (persisted in db_config.json).
+  if (du !== undefined && du) {
+    fetch('/api/db-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dbUrl: du }),
+    }).then(r => r.json()).then(res => {
+      if (!res.success) addSystemMsg(`✗ DB config: ${res.error}`);
+      else if (res.warning) addSystemMsg(`⚠ DB URL saved, but connect failed: ${res.warning}`);
+      else { addSystemMsg(`✓ Database connected: ${res.dbUrl}`); checkDbStatus(); }
+    }).catch(e => addSystemMsg(`✗ DB config failed: ${e.message}`));
+  }
+  openModals.get('settings')?.close();
+  addSystemMsg('✓ Settings saved.');
+}
+
+function cmdClear() {
+  history = []; totalTokens = 0;
+  chatDoc.messages.innerHTML = '';
+  chatDoc.statusBar.textContent = 'tokens: 0';
+  addSystemMsg('Conversation cleared.');
+}
+
+// /imagine <prompt> — generate an image and show it in chat.
+// Works regardless of whether the chat model supports tool-calling.
+async function cmdImagine(prompt) {
+  const key = chatDoc.apiKey.value.trim();
+  if (!key) return addSystemMsg('⚠ Enter your API key first — open ⚙ Settings.');
+  addSystemMsg(`🎨 Generating image: <em>${escHtml(prompt)}</em>`);
+  try {
+    const rr = await fetch('/api/generate-image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        apiKey: getImageApiKey(), key,
+        baseUrl: normBaseUrl(getImageApiBaseUrl()),
+        model: imageModel,
+      }),
+    }).then(r => r.json()).catch(e => ({ error: e.message }));
+    if (rr.error) throw new Error(rr.error);
+    addBubble('assistant', `<img class="chat-img" src="${rr.image}" alt="generated image" />`);
+    // Keep the model-facing history clean: a short placeholder, not the huge base64 URL.
+    history.push({ role: 'assistant', content: '[generated image]' });
+  } catch (e) {
+    addSystemMsg(`❌ Image generation failed: ${escHtml(e.message)}`);
+  }
+}
+
+// /auto_imagine — craft a reverse image prompt from the character + recent scene,
+// then generate the image. Uses the chat model to write the prompt.
+async function cmdAutoImagine() {
+  const key = chatDoc.apiKey.value.trim();
+  if (!key) return addSystemMsg('⚠ Enter your API key first — open ⚙ Settings.');
+  if (!activeCharacter) return addSystemMsg('⚠ No active character. Use 🎭 Characters → USE IN CHAT first.');
+  // Predict which image model will be used (server confirms in its response):
+  // avatar + Venice → /image/edit (server-side IMAGE_EDIT_MODEL); otherwise imageModel.
+  const useEdit = !!activeCharacter.avatar && /venice\.ai/i.test(normBaseUrl(getImageApiBaseUrl()));
+  let predictedImgModel = imageModel;
+  if (useEdit) {
+    try {
+      const cfg = await fetch('/api/image-config').then(r => r.json());
+      predictedImgModel = cfg.imageEditModel;
+    } catch {}
+  }
+  addSystemMsg(`🎨 Auto-imagining the current scene…<br><small>chat: ${escHtml(chatDoc.modelSel.value)} · image: ${escHtml(predictedImgModel)}${useEdit ? ' (avatar edit)' : ''}</small>`);
+  try {
+    const rr = await fetch('/api/auto-imagine', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        character: activeCharacter,
+        recentMessages: history.slice(-8),
+        apiKey: key,
+        chatBaseUrl: normBaseUrl(getApiBaseUrl()),
+        chatModel: chatDoc.modelSel.value,
+        imageBaseUrl: normBaseUrl(getImageApiBaseUrl()),
+        imageApiKey: getImageApiKey(),
+        imageModel,
+      }),
+    }).then(r => r.json()).catch(e => ({ error: e.message }));
+    if (rr.error) throw new Error(rr.error);
+    addBubble('assistant', `<img class="chat-img" src="${rr.image}" alt="generated image" />`);
+    // Keep the model-facing history clean: a short placeholder, not the huge base64 URL.
+    history.push({ role: 'assistant', content: '[generated image]' });
+    addSystemMsg(`🎨 Prompt used: <em>${escHtml(rr.prompt)}</em><br><small>models — chat: ${escHtml(rr.chatModel || '?')} · image: ${escHtml(rr.imageModel || '?')}</small>`);
+  } catch (e) {
+    addSystemMsg(`❌ Auto-imagine failed: ${escHtml(e.message)}`);
+  }
+}
+
+/* ══════════════════════════════════════════════════════
+   MODAL FACTORY
+══════════════════════════════════════════════════════ */
+function openModal({ id, title, width='480px', height='400px', content='', footer='' }) {
+  if (openModals.has(id)) { openModals.get(id).focus(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'modal-root';
+
+  const body = document.createElement('div');
+  body.className = 'modal-body';
+  body.innerHTML = content;
+  root.appendChild(body);
+
+  if (footer) {
+    const ft = document.createElement('div');
+    ft.className = 'modal-footer';
+    ft.innerHTML = footer;
+    root.appendChild(ft);
+  }
+
+  const off = (modalOffset % 5) * 24;
+  modalOffset++;
+  const wb = new WinBox({
+    title,
+    width, height,
+    x: `calc(50% - ${parseInt(width)/2 - off}px)`,
+    y: `calc(50% - ${parseInt(height)/2 - off}px)`,
+    background: '#4a4580',
+    border: 2,
+    mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, wb);
+  return wb;
+}
+
+function openLogModal(title) {
+  const root = document.createElement('div');
+  root.className = 'modal-root';
+  const body = document.createElement('div');
+  body.className = 'modal-body';
+  body.style.padding = '8px';
+  const logEl = document.createElement('div');
+  logEl.className = 'log-stream';
+  body.appendChild(logEl);
+  root.appendChild(body);
+
+  const id  = `log-${Date.now()}`;
+  const off = (modalOffset % 5) * 24;
+  modalOffset++;
+  const win = new WinBox({
+    title, width: '520px', height: '380px',
+    x: `calc(50% - ${260 - off}px)`,
+    y: `calc(50% - ${190 - off}px)`,
+    background: '#4a4580', border: 2,
+    mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, win);
+  return { logEl, win };
+}
+
+function openFormModal({ id, title, width='420px', height='280px', fields=[], submitLabel='Submit', onSubmit }) {
+  const fieldHtml = fields.map(f => `
+    <label>${escHtml(f.label)}</label>
+    ${f.type === 'textarea'
+      ? `<textarea id="ff-${f.name}" placeholder="${escHtml(f.placeholder||'')}" style="min-height:90px"></textarea>`
+      : `<input type="${f.type||'text'}" id="ff-${f.name}" placeholder="${escHtml(f.placeholder||'')}" />`
+    }`).join('');
+
+  const footer = `
+    <button class="btn-primary" onclick="submitForm_${id.replace(/\W/g,'_')}()">${escHtml(submitLabel)}</button>
+    <button class="btn-secondary" onclick="openModals.get('${id}')?.close()">Cancel</button>`;
+
+  openModal({ id, title, width, height, content: fieldHtml, footer });
+
+  // Attach submit fn on window (simplest approach for inline onclick)
+  window[`submitForm_${id.replace(/\W/g,'_')}`] = () => {
+    const values = {};
+    fields.forEach(f => {
+      const el = document.getElementById(`ff-${f.name}`);
+      if (el) values[f.name] = el.value;
+    });
+    openModals.get(id)?.close();
+    onSubmit(values);
+    delete window[`submitForm_${id.replace(/\W/g,'_')}`];
+  };
+}
+
+function confirmModal(message, confirmLabel = 'Confirm') {
+  return new Promise(resolve => {
+    const id = `confirm-${Date.now()}`;
+    const content = `<div class="confirm-msg">${message}</div>`;
+    const footer  = `
+      <button class="btn-danger"      onclick="resolveConfirm_${id.replace(/\W/g,'_')}(true)">${escHtml(confirmLabel)}</button>
+      <button class="btn-secondary"   onclick="resolveConfirm_${id.replace(/\W/g,'_')}(false)">Cancel</button>`;
+    openModal({ id, title: '⚠ Confirm', width:'380px', height:'180px', content, footer,
+      onclose() {
+        // Resolve false if the dialog is dismissed via the WinBox ✕ button,
+        // so the awaiting tool-call loop never hangs.
+        openModals.delete(id);
+        resolve(false);
+        delete window[`resolveConfirm_${id.replace(/\W/g,'_')}`];
+      }
+    });
+    window[`resolveConfirm_${id.replace(/\W/g,'_')}`] = (val) => {
+      resolve(val);                 // resolve first so the ✕ onclose can't override
+      openModals.get(id)?.close();
+      delete window[`resolveConfirm_${id.replace(/\W/g,'_')}`];
+    };
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   DB / STATUS HELPERS
+══════════════════════════════════════════════════════ */
+async function dbCall(tool, args) {
+  try {
+    return await fetch('/api/db', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool, args }),
+    }).then(r => r.json());
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+async function fetchDbTools() {
+  try {
+    dbTools = await fetch('/api/tools').then(r => r.json());
+  } catch (_) { dbTools = []; }
+}
+
+async function checkDbStatus() {
+  if (!chatDoc) return;
+  try {
+    const res = await fetch('/api/status').then(r => r.json());
+    chatDoc.dbDot.className = res.connected ? 'ok' : 'err';
+    chatDoc.dbDot.title     = res.connected ? `DB: ${res.dbUrl}` : `DB: ${res.error}`;
+  } catch {
+    chatDoc.dbDot.className = 'err';
+    chatDoc.dbDot.title     = 'DB: server unreachable';
+  }
+}
+
+/* ══════════════════════════════════════════════════════
+   MODEL PICKER
+══════════════════════════════════════════════════════ */
+async function openModelPicker() {
+  const id = 'model-picker';
+  if (openModals.has(id)) { openModals.get(id).focus(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'modal-root mp-wrap';
+  root.innerHTML = `
+    <div class="mp-controls">
+      <input type="search" id="mp-search" placeholder="Search by name or provider…" autocomplete="off">
+      <select id="mp-cap">
+        <option value="">All capabilities</option>
+        <option value="image">Vision (image in)</option>
+        <option value="audio">Audio in</option>
+        <option value="file">File in</option>
+      </select>
+      <select id="mp-sort">
+        <option value="name">Sort: Name A–Z</option>
+        <option value="price_in">Sort: Price In ↑</option>
+        <option value="price_out">Sort: Price Out ↑</option>
+        <option value="context">Sort: Context ↓</option>
+      </select>
+    </div>
+    <div class="mp-table-wrap">
+      <div id="mp-loading" style="padding:30px;text-align:center;color:#666;font-size:13px">Loading models…</div>
+      <table class="mp-table" id="mp-table" style="display:none">
+        <thead><tr>
+          <th>Model</th>
+          <th>Input</th>
+          <th>Output</th>
+          <th style="text-align:right">Context</th>
+          <th style="text-align:right">In&nbsp;$/M</th>
+          <th style="text-align:right">Out&nbsp;$/M</th>
+        </tr></thead>
+        <tbody id="mp-body"></tbody>
+      </table>
+    </div>
+    <div class="mp-footer">
+      <span id="mp-count" class="mp-count">—</span>
+      <button class="btn-primary" id="mp-use">Use Selected</button>
+    </div>`;
+
+  const off = (modalOffset % 5) * 24;
+  modalOffset++;
+  const wb = new WinBox({
+    title: '⊞ Model Browser',
+    width: '820px', height: '540px',
+    x: `calc(50% - ${410 - off}px)`,
+    y: `calc(50% - ${270 - off}px)`,
+    background: '#4a4580', border: 2,
+    mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, wb);
+
+  let allModels = [];
+  let selected  = null;
+  const currentModel = chatDoc.modelSel.value;
+
+  function fmtPrice(perToken) {
+    const n = parseFloat(perToken || 0) * 1_000_000;
+    if (n === 0)   return `<span class="mp-price-free">free</span>`;
+    if (n < 0.1)   return `<span class="mp-price-cheap">$${n.toFixed(4)}</span>`;
+    if (n < 5)     return `<span class="mp-price-mid">$${n.toFixed(3)}</span>`;
+    return             `<span class="mp-price-exp">$${n.toFixed(2)}</span>`;
+  }
+
+  function fmtCtx(n) {
+    if (!n) return '—';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+    if (n >= 1_000)     return Math.round(n / 1_000) + 'K';
+    return String(n);
+  }
+
+  function badges(mods) {
+    const cfg = { text: ['mp-badge-text','T'], image: ['mp-badge-image','I'],
+                  audio: ['mp-badge-audio','A'], file: ['mp-badge-file','F'] };
+    return (mods || []).map(m => {
+      const [cls, lbl] = cfg[m] || ['mp-badge-text', m[0].toUpperCase()];
+      return `<span class="mp-badge ${cls}" title="${m}">${lbl}</span>`;
+    }).join('');
+  }
+
+  function filtered() {
+    const q   = document.getElementById('mp-search')?.value.toLowerCase() || '';
+    const cap = document.getElementById('mp-cap')?.value || '';
+    const srt = document.getElementById('mp-sort')?.value || 'name';
+
+    let list = allModels.filter(m => {
+      if (q && !m.id.toLowerCase().includes(q) && !(m.name||'').toLowerCase().includes(q)) return false;
+      if (cap && !(m.architecture?.input_modalities || []).includes(cap)) return false;
+      return true;
+    });
+
+    list.sort((a, b) => {
+      if (srt === 'name')      return (a.name||'').localeCompare(b.name||'');
+      if (srt === 'price_in')  return parseFloat(a.pricing?.prompt||0) - parseFloat(b.pricing?.prompt||0);
+      if (srt === 'price_out') return parseFloat(a.pricing?.completion||0) - parseFloat(b.pricing?.completion||0);
+      if (srt === 'context')   return (b.context_length||0) - (a.context_length||0);
+      return 0;
+    });
+    return list;
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('mp-body');
+    const count = document.getElementById('mp-count');
+    if (!tbody || !count) return;
+
+    const list = filtered();
+    count.textContent = `${list.length} model${list.length !== 1 ? 's' : ''}`;
+
+    const visible = list.slice(0, 150);
+    tbody.innerHTML = visible.map(m => {
+      const isSel   = selected ? selected === m.id : m.id === currentModel;
+      const inMods  = m.architecture?.input_modalities  || ['text'];
+      const outMods = m.architecture?.output_modalities || ['text'];
+      return `<tr class="mp-row${isSel ? ' mp-row-selected' : ''}" data-id="${escHtml(m.id)}">
+        <td class="mp-col-name">
+          <div class="mp-model-name" title="${escHtml(m.name)}">${escHtml(m.name)}</div>
+          <div class="mp-model-id">${escHtml(m.id)}</div>
+        </td>
+        <td>${badges(inMods)}</td>
+        <td>${badges(outMods)}</td>
+        <td class="mp-col-num">${fmtCtx(m.context_length)}</td>
+        <td class="mp-col-num">${fmtPrice(m.pricing?.prompt)}</td>
+        <td class="mp-col-num">${fmtPrice(m.pricing?.completion)}</td>
+      </tr>`;
+    }).join('');
+
+    if (list.length > 150) {
+      tbody.insertAdjacentHTML('beforeend',
+        `<tr><td colspan="6" style="text-align:center;color:#555;padding:8px;font-size:11px">
+          Showing 150 of ${list.length} — use search or filters to narrow results
+        </td></tr>`);
+    }
+
+    tbody.querySelectorAll('.mp-row').forEach(row => {
+      row.addEventListener('click', () => {
+        tbody.querySelectorAll('.mp-row').forEach(r => r.classList.remove('mp-row-selected'));
+        row.classList.add('mp-row-selected');
+        selected = row.dataset.id;
+      });
+      row.addEventListener('dblclick', () => {
+        selected = row.dataset.id;
+        applySelection();
+      });
+    });
+  }
+
+  function applySelection() {
+    if (!selected) return;
+    const model = allModels.find(m => m.id === selected);
+    if (!model) return;
+
+    const sel = chatDoc.modelSel;
+    if (!Array.from(sel.options).find(o => o.value === selected)) {
+      let cg = Array.from(sel.querySelectorAll('optgroup')).find(g => g.label === 'Custom');
+      if (!cg) { cg = document.createElement('optgroup'); cg.label = 'Custom'; sel.appendChild(cg); }
+      const opt = document.createElement('option');
+      opt.value = selected; opt.text = model.name;
+      cg.appendChild(opt);
+    }
+    sel.value = selected;
+    wb.close();
+    addSystemMsg(`Model set to <strong>${escHtml(model.name)}</strong>`);
+  }
+
+  root.querySelector('#mp-use').addEventListener('click', applySelection);
+  ['mp-search','mp-cap','mp-sort'].forEach(eid =>
+    root.querySelector(`#${eid}`)?.addEventListener('input', renderTable)
+  );
+
+  try {
+    const key = chatDoc.apiKey.value.trim();
+        const params = new URLSearchParams();
+        if (key) params.set('key', key);
+        params.set('base_url', normBaseUrl(getApiBaseUrl()));
+        const url  = '/api/models?' + params.toString();
+        const data = await fetch(url).then(r => r.json());
+    allModels  = (data.data || []).filter(m => m.id && m.name);
+
+    root.querySelector('#mp-loading').style.display = 'none';
+    root.querySelector('#mp-table').style.display   = '';
+    renderTable();
+  } catch (e) {
+    root.querySelector('#mp-loading').textContent = `❌ Failed to load models: ${e.message}`;
+  }
+}
+
+/* ══════════════════════════════════════════════════════
+   UTILITY
+══════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════
+   TEXT / CODE EDITOR
+══════════════════════════════════════════════════════ */
+let editorCount = 0;
+
+const EXT_LANG = { js:'javascript', mjs:'javascript', cjs:'javascript', ts:'typescript', tsx:'typescript', jsx:'javascript', py:'python', html:'html', htm:'html', css:'css', json:'json', jsonl:'json', sql:'sql', sh:'bash', bash:'bash', md:'markdown', markdown:'markdown', yaml:'yaml', yml:'yaml', xml:'xml', txt:'plain', csv:'plain', env:'plain' };
+
+const LANGS = ['plain','javascript','typescript','python','html','css','json','sql','bash','markdown','yaml','xml'];
+
+function openEditorWindow({ filename = 'untitled.txt', content = '', language = '', fileRef = null } = {}) {
+  editorCount++;
+  const eid = `ed-${editorCount}`;
+
+  if (!language) {
+    const ext = filename.split('.').pop().toLowerCase();
+    language = EXT_LANG[ext] || 'plain';
+  }
+
+  const root = document.createElement('div');
+  root.className = 'ed-root';
+  root.innerHTML = `
+    <div class="ed-toolbar">
+      <input class="ed-filename" type="text" value="${escHtml(filename)}" placeholder="filename…" spellcheck="false" />
+      <select class="ed-lang">
+        ${LANGS.map(l => `<option value="${l}"${l === language ? ' selected' : ''}>${l}</option>`).join('')}
+      </select>
+      <button class="ed-tbtn" id="${eid}-wrap" title="Toggle word wrap">↵ Wrap</button>
+      <button class="ed-tbtn" id="${eid}-copy">📋 Copy</button>
+      <button class="ed-tbtn" id="${eid}-dl">⬇ Save</button>
+      <button class="ed-tbtn" id="${eid}-new" title="Open a new blank editor">＋ New</button>
+      <button class="ed-tbtn ed-tbtn-db" id="${eid}-dbsave" style="display:none" title="Save content back to the file store">💾 DB Save</button>
+    </div>
+    <div class="ed-wrap">
+      <div class="ed-lines" id="${eid}-lines">1</div>
+      <textarea class="ed-textarea" id="${eid}-ta"
+        spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"
+      ></textarea>
+    </div>
+    <div class="ed-statusbar">
+      <span class="ed-sl" id="${eid}-pos">Ln 1, Col 1</span>
+      <span class="ed-sl" id="${eid}-chars">0 chars</span>
+      <span class="ed-sl" id="${eid}-lang"></span>
+    </div>`;
+
+  const ta      = root.querySelector(`#${eid}-ta`);
+  const linesEl = root.querySelector(`#${eid}-lines`);
+  const posEl   = root.querySelector(`#${eid}-pos`);
+  const charEl  = root.querySelector(`#${eid}-chars`);
+  const langLbl = root.querySelector(`#${eid}-lang`);
+  const langSel = root.querySelector('.ed-lang');
+  const fileEl  = root.querySelector('.ed-filename');
+
+  // Set content safely (no innerHTML)
+  ta.value = content;
+
+  let wordWrap = false;
+
+  function updateLines() {
+    const count = ta.value.split('\n').length;
+    linesEl.textContent = Array.from({ length: count }, (_, i) => i + 1).join('\n');
+    linesEl.scrollTop = ta.scrollTop;
+  }
+
+  function updateStatus() {
+    const val   = ta.value;
+    const lines = val.slice(0, ta.selectionStart).split('\n');
+    posEl.textContent  = `Ln ${lines.length}, Col ${lines[lines.length - 1].length + 1}`;
+    charEl.textContent = `${val.length.toLocaleString()} chars · ${val.split('\n').length} lines`;
+    langLbl.textContent = langSel.value;
+  }
+
+  function refresh() { updateLines(); updateStatus(); }
+
+  ta.addEventListener('input',  refresh);
+  ta.addEventListener('click',  updateStatus);
+  ta.addEventListener('keyup',  updateStatus);
+  ta.addEventListener('scroll', () => { linesEl.scrollTop = ta.scrollTop; });
+  langSel.addEventListener('change', updateStatus);
+
+  // Tab → spaces, Enter → auto-indent
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const s = ta.selectionStart, end = ta.selectionEnd;
+      if (s === end) {
+        ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(end);
+        ta.selectionStart = ta.selectionEnd = s + 2;
+      } else {
+        // indent selected lines
+        const lines = ta.value.split('\n');
+        let charCount = 0, startLine = 0, endLine = 0;
+        for (let i = 0; i < lines.length; i++) {
+          if (charCount <= s) startLine = i;
+          if (charCount <= end) endLine = i;
+          charCount += lines[i].length + 1;
+        }
+        for (let i = startLine; i <= endLine; i++) lines[i] = '  ' + lines[i];
+        ta.value = lines.join('\n');
+      }
+      refresh();
+    }
+    if (e.key === 'Enter' && !e.ctrlKey) {
+      const s         = ta.selectionStart;
+      const lineStart = ta.value.lastIndexOf('\n', s - 1) + 1;
+      const indent    = ta.value.slice(lineStart).match(/^[ \t]*/)[0];
+      if (indent) {
+        e.preventDefault();
+        ta.value = ta.value.slice(0, s) + '\n' + indent + ta.value.slice(ta.selectionEnd);
+        ta.selectionStart = ta.selectionEnd = s + 1 + indent.length;
+        refresh();
+      }
+    }
+  });
+
+  // Word-wrap toggle
+  root.querySelector(`#${eid}-wrap`).addEventListener('click', function () {
+    wordWrap = !wordWrap;
+    ta.style.whiteSpace = wordWrap ? 'pre-wrap' : 'pre';
+    ta.style.wordBreak  = wordWrap ? 'break-all' : 'normal';
+    this.style.color    = wordWrap ? '#a89fff' : '';
+    this.style.borderColor = wordWrap ? '#6c63ff' : '';
+  });
+
+  // Copy
+  root.querySelector(`#${eid}-copy`).addEventListener('click', function () {
+    navigator.clipboard.writeText(ta.value).catch(() => {});
+    const prev = this.textContent;
+    this.textContent = '✓ Copied!';
+    setTimeout(() => this.textContent = prev, 1600);
+  });
+
+  // Download / save to disk
+  root.querySelector(`#${eid}-dl`).addEventListener('click', () => {
+    const blob = new Blob([ta.value], { type: 'text/plain;charset=utf-8' });
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = fileEl.value.trim() || 'untitled.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // New blank editor
+  root.querySelector(`#${eid}-new`).addEventListener('click', () => openEditorWindow());
+
+  // Keep WinBox title in sync with filename
+  fileEl.addEventListener('input', () => wb.setTitle('📝 ' + (fileEl.value.trim() || 'untitled')));
+
+  // DB Save — only shown when editor is linked to a stored file
+  if (fileRef) {
+    const dbBtn = root.querySelector(`#${eid}-dbsave`);
+    dbBtn.style.display = '';
+    let dirty = false;
+
+    ta.addEventListener('input', () => {
+      if (!dirty) {
+        dirty = true;
+        dbBtn.classList.add('dirty');
+        dbBtn.textContent = '💾 DB Save*';
+      }
+    });
+
+    dbBtn.addEventListener('click', async () => {
+      dbBtn.textContent = '…'; dbBtn.disabled = true;
+      try {
+        const res = await fetch(`/api/files/${fileRef.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: ta.value, language: langSel.value }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        dirty = false;
+        dbBtn.classList.remove('dirty'); dbBtn.classList.add('saved');
+        dbBtn.textContent = '✓ Saved';
+        setTimeout(() => { dbBtn.classList.remove('saved'); dbBtn.textContent = '💾 DB Save'; }, 2000);
+      } catch (e) {
+        dbBtn.textContent = '✗ Failed';
+        setTimeout(() => { dbBtn.textContent = '💾 DB Save*'; }, 2000);
+      } finally {
+        dbBtn.disabled = false;
+      }
+    });
+  }
+
+  // Initial render
+  refresh();
+
+  const off = (modalOffset % 8) * 20; modalOffset++;
+  const wb  = new WinBox({
+    title:  `📝 ${filename}`,
+    width:  '680px',
+    height: '520px',
+    x: `calc(50% - ${340 - off}px)`,
+    y: `calc(50% - ${260 - off}px)`,
+    background: '#1e3a2f',
+    border: 2,
+    mount: root,
+    onclose() { openModals.delete(eid); },
+  });
+  openModals.set(eid, wb);
+
+  // Focus textarea after WinBox finishes mounting
+  setTimeout(() => { ta.focus(); ta.setSelectionRange(0, 0); }, 60);
+  return wb;
+}
+
+/* ══════════════════════════════════════════════════════
+   FILE EXPLORER
+══════════════════════════════════════════════════════ */
+async function openFileExplorer() {
+  const id = 'file-explorer';
+  if (openModals.has(id)) { openModals.get(id).focus(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'fe-root';
+  root.innerHTML = `
+    <div class="fe-toolbar">
+      <button class="fe-tbtn" id="fe-new">📄 New File</button>
+      <button class="fe-tbtn" id="fe-refresh" title="Refresh">↺</button>
+      <input  class="fe-search" id="fe-search" type="search" placeholder="Filter files…" autocomplete="off" />
+    </div>
+    <div class="fe-body">
+      <div class="fe-tree"   id="fe-tree"><div class="fe-empty">Loading…</div></div>
+      <div class="fe-detail" id="fe-detail"><div class="fe-empty">Select a file</div></div>
+    </div>
+    <div class="fe-statusbar" id="fe-status">—</div>`;
+
+  let allFiles = [];
+  let selectedFile = null;
+
+  const FILE_ICONS = { js:'🟨', mjs:'🟨', ts:'🔷', tsx:'🔷', jsx:'🟨', py:'🐍', html:'🌐', htm:'🌐', css:'🎨', json:'📋', jsonl:'📋', md:'📝', sql:'🗄', sh:'⚙', bash:'⚙', yaml:'⚙', yml:'⚙', xml:'📄', csv:'📊', txt:'📄', env:'🔑' };
+  const icon = name => FILE_ICONS[name.split('.').pop().toLowerCase()] || '📄';
+
+  const fmtBytes = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n/1024).toFixed(1)} KB` : `${(n/1048576).toFixed(1)} MB`;
+  const fmtDate  = iso => { const d = new Date(iso); return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}); };
+
+  async function loadFiles() {
+    try {
+      const r = await fetch('/api/files');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      allFiles = await r.json();
+    } catch (e) {
+      root.querySelector('#fe-tree').innerHTML = `<div class="fe-empty" style="color:#ff6b6b">Error: ${escHtml(e.message)}</div>`;
+      return;
+    }
+    renderTree();
+  }
+
+  function renderTree() {
+    const q       = root.querySelector('#fe-search').value.toLowerCase();
+    const treeEl  = root.querySelector('#fe-tree');
+    const statusEl = root.querySelector('#fe-status');
+
+    const shown = q ? allFiles.filter(f => f.name.toLowerCase().includes(q) || f.folder.toLowerCase().includes(q)) : allFiles;
+
+    if (!shown.length) {
+      treeEl.innerHTML = `<div class="fe-empty">${q ? 'No matches.' : 'No files yet.\nClick 📄 New File to start.'}</div>`;
+      statusEl.textContent = '0 files';
+      return;
+    }
+
+    // Group by folder
+    const grouped = {};
+    shown.forEach(f => (grouped[f.folder] ??= []).push(f));
+    const folders = Object.keys(grouped).sort();
+
+    treeEl.innerHTML = '';
+    folders.forEach(folder => {
+      const hdr = document.createElement('div');
+      hdr.className = 'fe-folder-hdr';
+      hdr.textContent = folder === '/' ? '/ root' : folder;
+      treeEl.appendChild(hdr);
+
+      grouped[folder].forEach(f => {
+        const row = document.createElement('div');
+        row.className = 'fe-file-row' + (selectedFile?.id === f.id ? ' fe-selected' : '');
+        row.dataset.id = f.id;
+        row.innerHTML = `<span class="fe-file-icon">${icon(f.name)}</span><span class="fe-file-name" title="${escHtml(f.folder + '/' + f.name)}">${escHtml(f.name)}</span>`;
+        row.addEventListener('click', () => selectFile(f));
+        row.addEventListener('dblclick', () => openInEditor(f));
+        treeEl.appendChild(row);
+      });
+    });
+
+    statusEl.textContent = `${shown.length} file${shown.length !== 1 ? 's' : ''} · ${folders.length} folder${folders.length !== 1 ? 's' : ''}`;
+  }
+
+  function selectFile(f) {
+    selectedFile = f;
+    root.querySelectorAll('.fe-file-row').forEach(r => r.classList.toggle('fe-selected', +r.dataset.id === f.id));
+    const det = root.querySelector('#fe-detail');
+    det.innerHTML = `
+      <div class="fe-detail-name">${icon(f.name)} ${escHtml(f.name)}</div>
+      <div class="fe-meta-grid">
+        <span class="fe-meta-lbl">Location</span><span class="fe-meta-val">${escHtml(f.folder)}</span>
+        <span class="fe-meta-lbl">Language</span><span class="fe-meta-val">${escHtml(f.language)}</span>
+        <span class="fe-meta-lbl">Size</span><span class="fe-meta-val">${fmtBytes(f.size || 0)}</span>
+        <span class="fe-meta-lbl">Modified</span><span class="fe-meta-val">${fmtDate(f.updated_at)}</span>
+        <span class="fe-meta-lbl">Created</span><span class="fe-meta-val">${fmtDate(f.created_at)}</span>
+      </div>
+      <div class="fe-actions">
+        <button class="fe-act" id="fe-open">📝 Open in Editor</button>
+        <button class="fe-act" id="fe-rename">✏ Rename</button>
+        <button class="fe-act fe-danger" id="fe-delete">🗑 Delete</button>
+      </div>`;
+
+    det.querySelector('#fe-open').addEventListener('click',   () => openInEditor(f));
+    det.querySelector('#fe-rename').addEventListener('click', () => renameFile(f));
+    det.querySelector('#fe-delete').addEventListener('click', () => deleteFile(f));
+  }
+
+  async function openInEditor(f) {
+    try {
+      const res = await fetch(`/api/files/${f.id}`).then(r => r.json());
+      if (res.error) throw new Error(res.error);
+      openEditorWindow({ filename: res.name, content: res.content, language: res.language, fileRef: { id: res.id, name: res.name, folder: res.folder } });
+    } catch (e) {
+      addSystemMsg(`❌ Could not open file: ${escHtml(e.message)}`);
+    }
+  }
+
+  async function renameFile(f) {
+    const newName = prompt(`Rename "${f.name}" to:`, f.name);
+    if (!newName || newName === f.name) return;
+    const res = await fetch(`/api/files/${f.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName }),
+    }).then(r => r.json()).catch(e => ({ error: e.message }));
+    if (res.error) return addSystemMsg(`❌ Rename failed: ${escHtml(res.error)}`);
+    selectedFile = null;
+    root.querySelector('#fe-detail').innerHTML = '<div class="fe-empty">Select a file</div>';
+    await loadFiles();
+  }
+
+  async function deleteFile(f) {
+    if (!confirm(`Delete "${f.name}"?`)) return;
+    const res = await fetch(`/api/files/${f.id}`, { method: 'DELETE' }).then(r => r.json()).catch(e => ({ error: e.message }));
+    if (res.error) return addSystemMsg(`❌ Delete failed: ${escHtml(res.error)}`);
+    selectedFile = null;
+    root.querySelector('#fe-detail').innerHTML = '<div class="fe-empty">Select a file</div>';
+    await loadFiles();
+  }
+
+  function showNewFileForm() {
+    const det = root.querySelector('#fe-detail');
+    det.innerHTML = `
+      <div class="fe-detail-name">📄 New File</div>
+      <div class="fe-nf-form">
+        <div><div class="fe-nf-label">Filename</div><input type="text" id="nf-name" class="ap-inp" placeholder="e.g., script.py" autocomplete="off" /></div>
+        <div><div class="fe-nf-label">Folder</div><input type="text" id="nf-folder" class="ap-inp" value="/" placeholder="/" autocomplete="off" /></div>
+        <div><div class="fe-nf-label">Language</div>
+          <select id="nf-lang" class="ap-inp">
+            ${LANGS.map(l => `<option value="${l}">${l}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="fe-actions" style="margin-top:12px">
+        <button class="fe-act" id="nf-create">✓ Create &amp; Open in Editor</button>
+        <button class="fe-act" id="nf-cancel">✕ Cancel</button>
+      </div>`;
+
+    const nameEl = det.querySelector('#nf-name');
+    const langEl = det.querySelector('#nf-lang');
+    nameEl.addEventListener('input', () => { const l = EXT_LANG[nameEl.value.split('.').pop().toLowerCase()]; if (l) langEl.value = l; });
+    nameEl.focus();
+
+    det.querySelector('#nf-create').addEventListener('click', async () => {
+      const name     = nameEl.value.trim();
+      const folder   = (det.querySelector('#nf-folder').value.trim() || '/');
+      const language = langEl.value;
+      if (!name) { nameEl.focus(); return; }
+      const res = await fetch('/api/files', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, folder, content: '', language }),
+      }).then(r => r.json()).catch(e => ({ error: e.message }));
+      if (res.error) return addSystemMsg(`❌ ${escHtml(res.error)}`);
+      openEditorWindow({ filename: name, content: '', language, fileRef: { id: res.id, name: res.name, folder: res.folder } });
+      await loadFiles();
+    });
+
+    det.querySelector('#nf-cancel').addEventListener('click', () => {
+      det.innerHTML = '<div class="fe-empty">Select a file</div>';
+    });
+  }
+
+  root.querySelector('#fe-new').addEventListener('click', showNewFileForm);
+  root.querySelector('#fe-refresh').addEventListener('click', loadFiles);
+  root.querySelector('#fe-search').addEventListener('input', renderTree);
+
+  await loadFiles();
+
+  const off = (modalOffset % 5) * 24; modalOffset++;
+  const wb = new WinBox({
+    title: '🗂 File Explorer', width: '680px', height: '500px',
+    x: `calc(50% - ${340 - off}px)`, y: `calc(50% - ${250 - off}px)`,
+    background: '#2a3a4a', border: 2, mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, wb);
+}
+
+/* ══════════════════════════════════════════════════════
+   FILE UPLOAD
+══════════════════════════════════════════════════════ */
+async function handleFileSelection() {
+  const files = Array.from(chatDoc.fileInput.files);
+  chatDoc.fileInput.value = '';           // allow re-selecting same file
+  for (const file of files) {
+    const isImage = file.type.startsWith('image/');
+    try {
+      const data = await readFileAsDataOrText(file, isImage);
+      pendingAttachments.push({ name: file.name, type: file.type, data, isImage });
+    } catch (e) {
+      addSystemMsg(`⚠ Could not read <strong>${escHtml(file.name)}</strong>: ${escHtml(e.message)}`);
+    }
+  }
+  updateFilePreview();
+}
+
+function readFileAsDataOrText(file, asBase64) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    if (asBase64) {
+      reader.onload = () => resolve(reader.result);   // data: URL
+      reader.readAsDataURL(file);
+    } else {
+      reader.onload = () => resolve(reader.result);
+      reader.readAsText(file);
+    }
+  });
+}
+
+function updateFilePreview() {
+  const fp = chatDoc.filePreview;
+  if (!fp) return;
+  fp.innerHTML = '';
+  if (!pendingAttachments.length) {
+    fp.classList.remove('visible');
+    chatDoc.uploadBtn.classList.remove('has-files');
+    return;
+  }
+  fp.classList.add('visible');
+  chatDoc.uploadBtn.classList.add('has-files');
+  pendingAttachments.forEach((a, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'file-chip';
+    chip.innerHTML = `<span class="file-chip-name" title="${escHtml(a.name)}">${a.isImage ? '🖼' : '📄'} ${escHtml(a.name)}</span><span class="file-chip-x" data-idx="${i}">✕</span>`;
+    chip.querySelector('.file-chip-x').addEventListener('click', () => {
+      pendingAttachments.splice(i, 1);
+      updateFilePreview();
+    });
+    fp.appendChild(chip);
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   CONVERSATIONS — localStorage helpers
+══════════════════════════════════════════════════════ */
+function getConversations() {
+  try { return JSON.parse(localStorage.getItem('winboxai_conversations') || '[]'); } catch { return []; }
+}
+function saveConversations(list) { localStorage.setItem('winboxai_conversations', JSON.stringify(list)); }
+
+function saveConversationAs(name) {
+  if (!name) return;
+  const list = getConversations();
+  const entry = {
+    name,
+    savedAt: new Date().toISOString(),
+    history: JSON.parse(JSON.stringify(history)),
+    tokens: totalTokens,
+  };
+  const idx = list.findIndex(c => c.name === name);
+  if (idx >= 0) list[idx] = entry; else list.unshift(entry);
+  saveConversations(list);
+  return entry;
+}
+
+function openConversationsModal() {
+  const id = 'conversations';
+  if (openModals.has(id)) { openModals.get(id).focus(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'cv-root';
+  root.innerHTML = `
+    <div class="cv-save-bar">
+      <input type="text" id="cv-name" placeholder="Name this conversation…" />
+      <button class="cv-btn-save" id="cv-save">Save Current</button>
+    </div>
+    <div class="cv-list" id="cv-list"></div>`;
+
+  const listEl = root.querySelector('#cv-list');
+  const nameEl = root.querySelector('#cv-name');
+
+  function fmt(iso) {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month:'short', day:'numeric' }) + ' ' +
+           d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
+  }
+
+  function msgCount(h) { return h.filter(m => m.role === 'user' || m.role === 'assistant').length; }
+
+  function renderList() {
+    const convos = getConversations();
+    if (!convos.length) {
+      listEl.innerHTML = '<div class="cv-empty">No saved conversations yet.<br>Type a name above and click <strong>Save Current</strong>.</div>';
+      return;
+    }
+    listEl.innerHTML = convos.map((c, i) => `
+      <div class="cv-item" data-idx="${i}">
+        <div class="cv-item-info">
+          <div class="cv-item-name" title="${escHtml(c.name)}">${escHtml(c.name)}</div>
+          <div class="cv-item-meta">${msgCount(c.history)} messages · ${fmt(c.savedAt)} · ${(c.tokens||0).toLocaleString()} tokens</div>
+        </div>
+        <button class="cv-btn-load" data-idx="${i}">↩ Load</button>
+        <button class="cv-btn-del"  data-idx="${i}">🗑</button>
+      </div>`).join('');
+
+    listEl.querySelectorAll('.cv-btn-load').forEach(btn =>
+      btn.addEventListener('click', () => {
+        const c = getConversations()[+btn.dataset.idx];
+        if (!c) return;
+        history = JSON.parse(JSON.stringify(c.history));
+        totalTokens = c.tokens || 0;
+        chatDoc.statusBar.textContent = `tokens: ${totalTokens.toLocaleString()}`;
+        chatDoc.messages.innerHTML = '';
+        history.forEach(m => {
+                  if (m.role === 'user') {
+                    if (Array.isArray(m.content)) {
+                      const html = m.content.map(p => {
+                        if (p.type === 'image_url') return `<img class="chat-img" src="${p.image_url.url}" alt="attached image" />`;
+                        return escHtml(p.text || '').replace(/\n/g,'<br>');
+                      }).join(' ');
+                      addBubble('user', html);
+                    } else {
+                      addBubble('user', escHtml(m.content).replace(/\n/g,'<br>'));
+                    }
+          } else if (m.role === 'assistant' && m.content) {
+            addBubble('assistant', renderMarkdown(m.content));
+          }
+        });
+        openModals.get(id)?.close();
+        addSystemMsg(`💬 Loaded "<strong>${escHtml(c.name)}</strong>".`);
+      })
+    );
+
+    listEl.querySelectorAll('.cv-btn-del').forEach(btn =>
+      btn.addEventListener('click', () => {
+        const list = getConversations();
+        const c = list[+btn.dataset.idx];
+        if (!c || !confirm(`Delete "${c.name}"?`)) return;
+        list.splice(+btn.dataset.idx, 1);
+        saveConversations(list);
+        renderList();
+      })
+    );
+  }
+
+  renderList();
+
+  root.querySelector('#cv-save').addEventListener('click', () => {
+    const name = nameEl.value.trim();
+    if (!name) { nameEl.focus(); return; }
+    if (!history.length) { addSystemMsg('⚠ Nothing to save — conversation is empty.'); return; }
+    saveConversationAs(name);
+    renderList();
+    addSystemMsg(`💾 Conversation saved as "<strong>${escHtml(name)}</strong>".`);
+    nameEl.value = '';
+  });
+
+  // Pre-fill name if chat has a prior saved name
+  nameEl.addEventListener('keydown', e => { if (e.key === 'Enter') root.querySelector('#cv-save').click(); });
+
+  const off = (modalOffset % 5) * 24; modalOffset++;
+  const wb = new WinBox({
+    title: '💬 Conversations', width: '520px', height: '440px',
+    x: `calc(50% - ${260 - off}px)`, y: `calc(50% - ${220 - off}px)`,
+    background: '#4a4580', border: 2, mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, wb);
+}
+
+/* ══════════════════════════════════════════════════════
+   AGENT PROFILES — localStorage helpers
+══════════════════════════════════════════════════════ */
+function getAgents() {
+  try { return JSON.parse(localStorage.getItem('winboxai_agents') || '[]'); } catch { return []; }
+}
+function saveAgents(list) { localStorage.setItem('winboxai_agents', JSON.stringify(list)); }
+
+function openAgentsModal() {
+  const id = 'agent-profiles';
+  if (openModals.has(id)) { openModals.get(id).focus(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'ap-root';
+  root.innerHTML = `
+    <div class="ap-left">
+      <div class="ap-section-title">Agents</div>
+      <select id="ap-dd" class="ap-dropdown"></select>
+      <div class="ap-spacer"></div>
+      <div class="ap-btn-row">
+        <button class="ap-btn ap-btn-use"  id="ap-use">USE</button>
+        <button class="ap-btn ap-btn-edit" id="ap-edit">EDIT</button>
+        <button class="ap-btn ap-btn-del"  id="ap-del">DELETE</button>
+      </div>
+    </div>
+    <div class="ap-right">
+      <div class="ap-lbl">Name:</div>
+      <input  type="text" id="ap-name"   class="ap-inp" />
+      <div class="ap-lbl">Description:</div>
+      <textarea id="ap-desc"   class="ap-inp" rows="3"></textarea>
+      <div class="ap-lbl">Tools (comma-separated):</div>
+      <input  type="text" id="ap-tools"  class="ap-inp" placeholder="WRITE, READ, multiedit" />
+      <div class="ap-lbl">System Message:</div>
+      <textarea id="ap-sys"    class="ap-inp" style="flex:1;min-height:110px"></textarea>
+      <button id="ap-save" class="ap-save">SAVE</button>
+    </div>`;
+
+  const dd     = root.querySelector('#ap-dd');
+  const nameEl = root.querySelector('#ap-name');
+  const descEl = root.querySelector('#ap-desc');
+  const toolEl = root.querySelector('#ap-tools');
+  const sysEl  = root.querySelector('#ap-sys');
+
+  function refreshDd() {
+    const agents = getAgents();
+    dd.innerHTML = '<option value="">— new agent —</option>' +
+      agents.map((a, i) => `<option value="${i}">${escHtml(a.name)}</option>`).join('');
+  }
+  refreshDd();
+
+  function populate(idx) {
+    const a = getAgents()[idx];
+    if (!a) { nameEl.value = ''; descEl.value = ''; toolEl.value = ''; sysEl.value = ''; return; }
+    nameEl.value = a.name || '';
+    descEl.value = a.description || '';
+    toolEl.value = a.tools || '';
+    sysEl.value  = a.systemMessage || '';
+  }
+
+  dd.addEventListener('change', () => populate(parseInt(dd.value)));
+
+  root.querySelector('#ap-save').addEventListener('click', () => {
+    const name = nameEl.value.trim();
+    if (!name) return addSystemMsg('⚠ Agent name is required.');
+    const agent = { name, description: descEl.value, tools: toolEl.value, systemMessage: sysEl.value };
+    const list = getAgents();
+    const existing = list.findIndex(a => a.name === name);
+    if (existing >= 0) list[existing] = agent; else list.push(agent);
+    saveAgents(list);
+    refreshDd();
+    dd.value = list.findIndex(a => a.name === name);
+    addSystemMsg(`✓ Agent "<strong>${escHtml(name)}</strong>" saved.`);
+  });
+
+  root.querySelector('#ap-use').addEventListener('click', () => {
+    const sys = sysEl.value.trim();
+    if (!sys) return addSystemMsg('⚠ System message is empty.');
+    history = history.filter(m => m.role !== 'system');
+    history.unshift({ role: 'system', content: sys });
+    const name = nameEl.value || 'Agent';
+    addSystemMsg(`👤 Agent "<strong>${escHtml(name)}</strong>" activated.`);
+    openModals.get(id)?.close();
+  });
+
+  root.querySelector('#ap-edit').addEventListener('click', () => nameEl.focus());
+
+  root.querySelector('#ap-del').addEventListener('click', () => {
+    const idx = parseInt(dd.value);
+    if (isNaN(idx) || idx < 0) return;
+    const list = getAgents();
+    const name = list[idx]?.name || 'this agent';
+    if (!confirm(`Delete agent "${name}"?`)) return;
+    list.splice(idx, 1);
+    saveAgents(list);
+    refreshDd();
+    populate(-1);
+  });
+
+  const off = (modalOffset % 5) * 24; modalOffset++;
+  const wb = new WinBox({
+    title: '👤 Agent Profiles', width: '660px', height: '480px',
+    x: `calc(50% - ${330 - off}px)`, y: `calc(50% - ${240 - off}px)`,
+    background: '#4a4580', border: 2, mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, wb);
+}
+
+/* ══════════════════════════════════════════════════════
+   TOOLS ENGINE — localStorage helpers
+══════════════════════════════════════════════════════ */
+// Custom tools are DB-backed (shared across browsers). We keep an in-memory cache
+// so existing synchronous call sites keep working; saveCustomTools syncs to the DB.
+let customToolsCache = [];
+
+async function loadCustomTools() {
+  try {
+    const r = await fetch('/api/custom-tools');
+    if (!r.ok) { customToolsCache = []; return; }
+    customToolsCache = await r.json();
+  } catch { customToolsCache = []; }
+}
+
+function getCustomTools() { return customToolsCache; }
+
+// Update the cache immediately, then persist to the DB (fire-and-forget).
+function saveCustomTools(list) {
+  customToolsCache = list;
+  syncCustomTools(list);
+}
+
+async function syncCustomTools(list) {
+  try {
+    const existing = await (await fetch('/api/custom-tools')).json();
+    const names = new Set(list.map(t => t.name));
+    // Upsert each tool in the new list
+    for (const t of list) {
+      const ex = existing.find(e => e.name === t.name);
+      const payload = { name: t.name, description: t.description || '', parameters: t.parameters || {}, body: t.body || '', language: t.language || 'python' };
+      if (ex) {
+        await fetch(`/api/custom-tools/${ex.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      } else {
+        await fetch('/api/custom-tools', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      }
+    }
+    // Delete tools that were removed from the list
+    for (const ex of existing) {
+      if (!names.has(ex.name)) {
+        await fetch(`/api/custom-tools/${ex.id}`, { method: 'DELETE' });
+      }
+    }
+  } catch (e) {
+    console.error('Failed to sync custom tools to DB:', e);
+  }
+}
+
+function buildCustomToolDefs() {
+  return getCustomTools().map(t => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description || '',
+      parameters: { type: 'object', properties: t.parameters || {}, required: [] },
+    },
+  }));
+}
+
+function openToolsModal() {
+  const id = 'tools';
+  if (openModals.has(id)) { openModals.get(id).focus(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'te-root';
+  root.innerHTML = `
+    <div class="te-left">
+      <div class="te-section-title">Tools</div>
+      <label class="te-toggle" title="Enable/disable AI tool-use">
+        <input type="checkbox" id="tl-toggle" ${toolsEnabled ? 'checked' : ''}> Enable AI tool-use
+      </label>
+      <select id="tl-list" class="te-list" size="10"></select>
+      <div class="te-left-btns">
+        <button class="te-btn-edit" id="tl-new">NEW</button>
+        <button class="te-btn-edit" id="tl-edit">EDIT</button>
+        <button class="te-btn-del"  id="tl-del">DELETE</button>
+      </div>
+    </div>
+    <div class="te-right">
+      <div class="te-lbl">Function Name (snake_case):</div>
+      <input  type="text" id="tl-name"   class="te-inp" placeholder="e.g., get_weather" />
+      <div class="te-lbl">Description (What the LLM sees):</div>
+      <textarea id="tl-desc"   class="te-inp" rows="2" placeholder="Useful for when you need to..."></textarea>
+      <div class="te-lbl">Parameters (JSON Schema format):</div>
+      <textarea id="tl-params" class="te-inp" rows="2" placeholder='{"city": {"type": "string"}}'></textarea>
+      <div class="te-lbl">Function Body (Python — def run(args): ... returns JSON):</div>
+      <textarea id="tl-body"   class="te-inp te-code" rows="6" placeholder='import json&#10;&#10;def run(args):&#10;    city = args.get("city", "unknown")&#10;    return {"weather": f"The weather in {city} is sunny"}'></textarea>
+      <div class="te-terminal" id="tl-out">&gt; Ready to test...</div>
+      <div class="te-action-row">
+        <button class="te-btn-test" id="tl-test">TEST LOGIC</button>
+        <button class="te-btn-save" id="tl-save">SAVE TOOL</button>
+      </div>
+    </div>`;
+
+  const toggleEl = root.querySelector('#tl-toggle');
+  const listEl   = root.querySelector('#tl-list');
+  const nameEl   = root.querySelector('#tl-name');
+  const descEl   = root.querySelector('#tl-desc');
+  const paramsEl = root.querySelector('#tl-params');
+  const bodyEl   = root.querySelector('#tl-body');
+  const outEl    = root.querySelector('#tl-out');
+
+  function setOut(msg, color = '#23c7a8') { outEl.style.color = color; outEl.innerHTML = msg; }
+
+  // On/off toggle — moved into the window
+  toggleEl.addEventListener('change', () => {
+    toolsEnabled = toggleEl.checked;
+    chatDoc.toolsBtn.classList.toggle('active', toolsEnabled);
+    addSystemMsg(toolsEnabled
+      ? '⚙ AI tool-use enabled — the AI can now call tools directly.'
+      : '⚙ AI tool-use disabled.');
+  });
+
+  // List: built-in DB tools (read-only) + custom tools (editable)
+  function refreshList() {
+    const custom = getCustomTools();
+    const db = (dbTools || []).map(t => t.function.name);
+    const opts = [];
+    db.forEach(n => opts.push(`<option value="db:${escHtml(n)}" disabled>${escHtml(n)} (built-in)</option>`));
+    custom.forEach((t, i) => opts.push(`<option value="c:${i}">${escHtml(t.name)}</option>`));
+    listEl.innerHTML = opts.join('');
+  }
+  refreshList();
+
+  function populateCustom(idx) {
+    const t = getCustomTools()[idx];
+    if (!t) { nameEl.value=''; descEl.value=''; paramsEl.value=''; bodyEl.value=''; return; }
+    nameEl.value   = t.name || '';
+    descEl.value   = t.description || '';
+    paramsEl.value = t.parameters ? JSON.stringify(t.parameters, null, 2) : '';
+    bodyEl.value   = t.body || '';
+    setOut('&gt; Editing "' + escHtml(t.name) + '".');
+  }
+
+  listEl.addEventListener('change', () => {
+    const v = listEl.value;
+    if (v.startsWith('c:')) populateCustom(parseInt(v.slice(2)));
+  });
+
+  root.querySelector('#tl-new').addEventListener('click', () => {
+    listEl.value = '';
+    nameEl.value=''; descEl.value=''; paramsEl.value=''; bodyEl.value='';
+    nameEl.focus();
+    setOut('&gt; New tool — fill in the fields and click SAVE TOOL.');
+  });
+
+  root.querySelector('#tl-edit').addEventListener('click', () => {
+    const v = listEl.value;
+    if (v.startsWith('c:')) { populateCustom(parseInt(v.slice(2))); nameEl.focus(); }
+  });
+
+  root.querySelector('#tl-del').addEventListener('click', () => {
+    const v = listEl.value;
+    if (!v.startsWith('c:')) return;
+    const idx = parseInt(v.slice(2));
+    const list = getCustomTools();
+    const name = list[idx]?.name || 'this tool';
+    if (!confirm(`Delete tool "${name}"?`)) return;
+    list.splice(idx, 1);
+    saveCustomTools(list);
+    refreshList();
+    populateCustom(-1);
+    setOut('&gt; Tool deleted.', '#f4a261');
+  });
+
+  root.querySelector('#tl-test').addEventListener('click', async () => {
+    const body = bodyEl.value.trim();
+    if (!body) { setOut('&gt; No function body to test.', '#f4a261'); return; }
+    try {
+      const rr = await fetch('/api/run-tool', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body, args: {} }),
+      }).then(r => r.json()).catch(e => ({ success: false, error: e.message }));
+      if (!rr.success) throw new Error(rr.error);
+      setOut('&gt; ' + escHtml(JSON.stringify(rr.result)), '#23c7a8');
+    } catch (e) {
+      setOut('&gt; Error: ' + escHtml(e.message), '#ff6b6b');
+    }
+  });
+
+  root.querySelector('#tl-save').addEventListener('click', () => {
+    const name = nameEl.value.trim();
+    if (!name) { setOut('&gt; Function name is required.', '#ff6b6b'); return; }
+    if (!/^[a-z][a-z0-9_]*$/.test(name)) {
+      setOut('&gt; Name must be snake_case (a–z, 0–9, _).', '#ff6b6b'); return;
+    }
+    let parameters = {};
+    try {
+      const raw = paramsEl.value.trim();
+      if (raw) parameters = JSON.parse(raw);
+    } catch { setOut('&gt; Parameters must be valid JSON.', '#ff6b6b'); return; }
+    const tool = { name, description: descEl.value, parameters, body: bodyEl.value, language: 'python' };
+    const list = getCustomTools();
+    const existing = list.findIndex(t => t.name === name);
+    if (existing >= 0) list[existing] = tool; else list.push(tool);
+    saveCustomTools(list);
+    refreshList();
+    listEl.value = `c:${list.findIndex(t => t.name === name)}`;
+    setOut('&gt; Tool "' + escHtml(name) + '" saved.', '#23c7a8');
+  });
+
+  const off = (modalOffset % 5) * 24; modalOffset++;
+  const wb = new WinBox({
+    title: '⚙ Tools', width: '720px', height: '560px',
+    x: `calc(50% - ${360 - off}px)`, y: `calc(50% - ${280 - off}px)`,
+    background: '#4a4580', border: 2, mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, wb);
+}
+
+function openToolsEngineModal() {
+  const id = 'tools-engine';
+  if (openModals.has(id)) { openModals.get(id).focus(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'te-root';
+  root.innerHTML = `
+    <div class="te-left">
+      <div class="te-section-title">Tools Engine</div>
+      <select id="te-list" class="te-list" size="10"></select>
+      <div class="te-left-btns">
+        <button class="te-btn-edit" id="te-edit">EDIT</button>
+        <button class="te-btn-del"  id="te-del">DELETE</button>
+      </div>
+    </div>
+    <div class="te-right">
+      <div class="te-lbl">Function Name (snake_case):</div>
+      <input  type="text" id="te-name"   class="te-inp" placeholder="e.g., get_weather" />
+      <div class="te-lbl">Description (What the LLM sees):</div>
+      <textarea id="te-desc"   class="te-inp" rows="2" placeholder="Useful for when you need to..."></textarea>
+      <div class="te-lbl">Parameters (JSON Schema format):</div>
+      <textarea id="te-params" class="te-inp" rows="2" placeholder='{"city": {"type": "string"}}'></textarea>
+      <div class="te-lbl">Function Body (Python — def run(args): ... returns JSON):</div>
+      <textarea id="te-body"   class="te-inp te-code" rows="6" placeholder='import json&#10;&#10;def run(args):&#10;    city = args.get("city", "unknown")&#10;    return {"weather": f"The weather in {city} is sunny"}'></textarea>
+      <div class="te-terminal" id="te-out">&gt; Ready to test...</div>
+      <div class="te-action-row">
+        <button class="te-btn-test" id="te-test">TEST LOGIC</button>
+        <button class="te-btn-save" id="te-save">SAVE TOOL</button>
+      </div>
+    </div>`;
+
+  const listEl   = root.querySelector('#te-list');
+  const nameEl   = root.querySelector('#te-name');
+  const descEl   = root.querySelector('#te-desc');
+  const paramsEl = root.querySelector('#te-params');
+  const bodyEl   = root.querySelector('#te-body');
+  const outEl    = root.querySelector('#te-out');
+
+  function refreshList() {
+    const tools = getCustomTools();
+    listEl.innerHTML = tools.map((t, i) =>
+      `<option value="${i}">${escHtml(t.name)}</option>`).join('');
+  }
+  refreshList();
+
+  function populate(idx) {
+    const t = getCustomTools()[idx];
+    if (!t) { nameEl.value = ''; descEl.value = ''; paramsEl.value = ''; bodyEl.value = ''; return; }
+    nameEl.value   = t.name || '';
+    descEl.value   = t.description || '';
+    paramsEl.value = t.parameters ? JSON.stringify(t.parameters, null, 2) : '';
+    bodyEl.value   = t.body || '';
+    setOut('&gt; Ready to test...', '#23c7a8');
+  }
+
+  function setOut(msg, color = '#23c7a8') {
+    outEl.style.color = color;
+    outEl.innerHTML = msg;
+  }
+
+  listEl.addEventListener('change', () => populate(parseInt(listEl.value)));
+
+  root.querySelector('#te-edit').addEventListener('click', () => {
+    populate(parseInt(listEl.value));
+    nameEl.focus();
+  });
+
+  root.querySelector('#te-del').addEventListener('click', () => {
+    const idx = parseInt(listEl.value);
+    if (isNaN(idx) || idx < 0) return;
+    const list = getCustomTools();
+    const name = list[idx]?.name || 'this tool';
+    if (!confirm(`Delete tool "${name}"?`)) return;
+    list.splice(idx, 1);
+    saveCustomTools(list);
+    refreshList();
+    populate(-1);
+    setOut('&gt; Tool deleted.', '#f4a261');
+  });
+
+  root.querySelector('#te-test').addEventListener('click', async () => {
+    const body = bodyEl.value.trim();
+    if (!body) { setOut('&gt; No function body to test.', '#f4a261'); return; }
+    try {
+      const rr = await fetch('/api/run-tool', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body, args: {} }),
+      }).then(r => r.json()).catch(e => ({ success: false, error: e.message }));
+      if (!rr.success) throw new Error(rr.error);
+      setOut('&gt; ' + escHtml(JSON.stringify(rr.result)), '#23c7a8');
+    } catch (e) {
+      setOut('&gt; Error: ' + escHtml(e.message), '#ff6b6b');
+    }
+  });
+
+  root.querySelector('#te-save').addEventListener('click', () => {
+    const name = nameEl.value.trim();
+    if (!name) { setOut('&gt; Function name is required.', '#ff6b6b'); return; }
+    if (!/^[a-z][a-z0-9_]*$/.test(name)) {
+      setOut('&gt; Name must be snake_case (a–z, 0–9, _).', '#ff6b6b'); return;
+    }
+    let parameters = {};
+    try {
+      const raw = paramsEl.value.trim();
+      if (raw) parameters = JSON.parse(raw);
+    } catch { setOut('&gt; Parameters must be valid JSON.', '#ff6b6b'); return; }
+
+    const tool = { name, description: descEl.value, parameters, body: bodyEl.value, language: 'python' };
+    const list = getCustomTools();
+    const existing = list.findIndex(t => t.name === name);
+    if (existing >= 0) list[existing] = tool; else list.push(tool);
+    saveCustomTools(list);
+    refreshList();
+    listEl.value = list.findIndex(t => t.name === name);
+    setOut(`&gt; Tool "${escHtml(name)}" saved.`, '#23c7a8');
+  });
+
+  const off = (modalOffset % 5) * 24; modalOffset++;
+  const wb = new WinBox({
+    title: '⚒ Tools Engine', width: '720px', height: '540px',
+    x: `calc(50% - ${360 - off}px)`, y: `calc(50% - ${270 - off}px)`,
+    background: '#4a4580', border: 2, mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, wb);
+}
+
+function renderMarkdown(src) {
+  const html = marked.parse(src);
+  return (window.DOMPurify ? DOMPurify.sanitize(html) : html);
+}
+
+/* ══════════════════════════════════════════════════════
+   SKILLS — DB-backed, progressive disclosure
+   Level 1 (metadata) is injected into the system prompt;
+   Level 2/3 (instructions + resources) load on demand via skill_read.
+══════════════════════════════════════════════════════ */
+let skillsMeta = []; // [{id, name, description}] — Level 1 metadata
+
+async function loadSkillsMeta() {
+  try {
+    const r = await fetch('/api/skills');
+    if (!r.ok) { skillsMeta = []; return; }
+    skillsMeta = await r.json();
+  } catch { skillsMeta = []; }
+}
+
+function openSkillsModal() {
+  const id = 'skills';
+  if (openModals.has(id)) { openModals.get(id).focus(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'te-root';
+  root.innerHTML = `
+    <div class="te-left">
+      <div class="te-section-title">Skills</div>
+      <select id="sk-list" class="te-list" size="10"></select>
+      <div class="te-left-btns">
+        <button class="te-btn-edit" id="sk-new">NEW</button>
+        <button class="te-btn-del"  id="sk-del">DELETE</button>
+      </div>
+    </div>
+    <div class="te-right">
+      <div class="te-lbl">Name (lowercase, hyphens):</div>
+      <input  type="text" id="sk-name"   class="te-inp" placeholder="e.g., pdf-processing" />
+      <div class="te-lbl">Description (what the AI sees — what it does + when to use it):</div>
+      <textarea id="sk-desc"   class="te-inp" rows="2" placeholder="Extract text from PDFs. Use when the user mentions PDFs or document extraction."></textarea>
+      <div class="te-lbl">Instructions (SKILL.md body — loaded when triggered):</div>
+      <textarea id="sk-instr"  class="te-inp te-code" rows="5" placeholder="# PDF Processing\n\n## Quick start\nUse pdfplumber to extract text..."></textarea>
+      <div class="te-lbl">Resources (JSON array of {name, content} — loaded as needed):</div>
+      <textarea id="sk-res"    class="te-inp te-code" rows="3" placeholder='[{"name":"REFERENCE.md","content":"..."}]'></textarea>
+      <div class="te-terminal" id="sk-out">&gt; Ready...</div>
+      <div class="te-action-row">
+        <button class="te-btn-save" id="sk-save">SAVE SKILL</button>
+      </div>
+    </div>`;
+
+  const listEl   = root.querySelector('#sk-list');
+  const nameEl   = root.querySelector('#sk-name');
+  const descEl   = root.querySelector('#sk-desc');
+  const instrEl  = root.querySelector('#sk-instr');
+  const resEl    = root.querySelector('#sk-res');
+  const outEl    = root.querySelector('#sk-out');
+
+  function setOut(msg, color = '#23c7a8') { outEl.style.color = color; outEl.innerHTML = msg; }
+
+  let skillsCache = [];
+  async function refreshList() {
+    try { skillsCache = await (await fetch('/api/skills')).json(); } catch { skillsCache = []; }
+    const prev = listEl.value;
+    listEl.innerHTML = skillsCache.map((s, i) =>
+      `<option value="${i}">${escHtml(s.name)}</option>`).join('');
+    // Preserve the selection across the re-render (innerHTML reset would drop it).
+    if (prev !== '' && parseInt(prev) < skillsCache.length) listEl.value = prev;
+    return skillsCache;
+  }
+
+  function populate(s) {
+    if (!s) { nameEl.value=''; descEl.value=''; instrEl.value=''; resEl.value=''; return; }
+    nameEl.value   = s.name || '';
+    descEl.value   = s.description || '';
+    instrEl.value  = s.instructions || '';
+    resEl.value    = Array.isArray(s.resources) ? JSON.stringify(s.resources, null, 2) : '';
+    setOut('&gt; Loaded "' + escHtml(s.name) + '".');
+  }
+
+  listEl.addEventListener('change', async () => {
+    const idx = parseInt(listEl.value);
+    const skills = await refreshList();
+    const s = skills[idx];
+    if (s) {
+      const full = await (await fetch(`/api/skills/${s.id}`)).json();
+      populate(full);
+    }
+  });
+
+  root.querySelector('#sk-new').addEventListener('click', () => {
+    listEl.value = '';
+    populate(null);
+    nameEl.focus();
+    setOut('&gt; New skill — fill in the fields and click SAVE SKILL.');
+  });
+
+  root.querySelector('#sk-del').addEventListener('click', async () => {
+    const skills = await refreshList();
+    const s = skills[parseInt(listEl.value)];
+    if (!s) return;
+    if (!confirm(`Delete skill "${s.name}"?`)) return;
+    await fetch(`/api/skills/${s.id}`, { method: 'DELETE' });
+    await refreshList();
+    populate(null);
+    setOut('&gt; Skill deleted.', '#f4a261');
+    await loadSkillsMeta();
+  });
+
+  root.querySelector('#sk-save').addEventListener('click', async () => {
+    const name = nameEl.value.trim();
+    if (!name) { setOut('&gt; Name is required.', '#ff6b6b'); return; }
+    if (!/^[a-z][a-z0-9-]*$/.test(name)) { setOut('&gt; Name must be lowercase letters, numbers, hyphens.', '#ff6b6b'); return; }
+    let resources = [];
+    const raw = resEl.value.trim();
+    if (raw) {
+      try { resources = JSON.parse(raw); }
+      catch { setOut('&gt; Resources must be valid JSON.', '#ff6b6b'); return; }
+    }
+    const payload = { name, description: descEl.value, instructions: instrEl.value, resources };
+    const skills = await refreshList();
+    const existing = skills.find(s => s.name === name);
+    let res;
+    if (existing) {
+      res = await fetch(`/api/skills/${existing.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      res = await fetch('/api/skills', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    }
+    if (!res.ok) { setOut('&gt; Save failed: ' + escHtml((await res.json()).error || res.status), '#ff6b6b'); return; }
+    await refreshList();
+    setOut('&gt; Skill "' + escHtml(name) + '" saved.', '#23c7a8');
+    await loadSkillsMeta();
+  });
+
+  const off = (modalOffset % 5) * 24; modalOffset++;
+  const wb = new WinBox({
+    title: '🧠 Skills', width: '720px', height: '560px',
+    x: `calc(50% - ${360 - off}px)`, y: `calc(50% - ${280 - off}px)`,
+    background: '#4a4580', border: 2, mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, wb);
+  refreshList();
+}
+
+function escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ══════════════════════════════════════════════════════
+   CHARACTER CARDS (roleplay profiles)
+══════════════════════════════════════════════════════ */
+// Currently active character (its full card), or null for no character.
+let activeCharacter = null;
+
+function buildLorebookBlock(book, contextText) {
+  if (!book || !Array.isArray(book.entries) || !book.entries.length) return '';
+  const entries = book.entries.filter(e => e && e.enabled !== false && e.content);
+  if (!entries.length) return '';
+  const ctx = (contextText || '').toLowerCase();
+  // Key-based activation: include an entry if any of its keys appear in context.
+  let active = entries.filter(e => {
+    const keys = (e.keys || []).concat(e.secondary_keys || []);
+    if (!keys.length) return true; // no keys -> always include
+    return keys.some(k => k && ctx.includes(String(k).toLowerCase()));
+  });
+  // If nothing matched, fall back to all enabled entries so the lore isn't lost.
+  if (!active.length) active = entries;
+  const lines = active.map(e => e.content).filter(Boolean);
+  if (!lines.length) return '';
+  return '\n\nWorld lore (use this to inform your responses when relevant):\n' + lines.join('\n---\n');
+}
+
+function buildCharacterSystemPrompt(c, contextText) {
+  const parts = [];
+  parts.push(`You are now playing the role of ${c.name || 'this character'} in a roleplay. Stay fully in character and respond as ${c.name || 'this character'} would. Do not break character or mention that you are an AI unless the user explicitly asks.`);
+  if (c.description) parts.push(`\nCharacter description:\n${c.description}`);
+  if (c.personality) parts.push(`\nPersonality:\n${c.personality}`);
+  if (c.scenario)    parts.push(`\nScenario:\n${c.scenario}`);
+  if (c.mes_example) parts.push(`\nExample dialogue (format reference):\n${c.mes_example}`);
+  if (c.system_prompt) parts.push(`\nSystem instructions:\n${c.system_prompt}`);
+  if (c.post_history)  parts.push(`\nPost-history instructions:\n${c.post_history}`);
+  const lore = buildLorebookBlock(c.character_book, contextText);
+  if (lore) parts.push(lore);
+  return parts.join('\n');
+}
+
+function openCharactersModal() {
+  const id = 'characters';
+  if (openModals.has(id)) { openModals.get(id).focus(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'te-root';
+  root.innerHTML = `
+    <div class="te-left">
+      <div class="te-section-title">Characters</div>
+      <select id="ch-list" class="te-list" size="10"></select>
+      <div class="te-left-btns">
+        <button class="te-btn-edit" id="ch-new">NEW</button>
+        <button class="te-btn-edit" id="ch-import">IMPORT PNG</button>
+        <button class="te-btn-edit" id="ch-export">EXPORT PNG</button>
+        <button class="te-btn-del"  id="ch-del">DELETE</button>
+      </div>
+      <input type="file" id="ch-file" accept="image/png" style="display:none" />
+      <div class="te-lbl" style="margin-top:12px">Avatar</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <img id="ch-avatar-preview" style="width:56px;height:56px;border-radius:8px;object-fit:cover;background:#222;display:none" />
+        <button class="te-btn-edit" id="ch-avatar-btn">UPLOAD IMAGE</button>
+        <button class="te-btn-del" id="ch-avatar-clear" style="display:none">✕</button>
+      </div>
+      <input type="file" id="ch-avatar-file" accept="image/*" style="display:none" />
+    </div>
+    <div class="te-right">
+      <div class="te-lbl">Name:</div>
+      <input  type="text" id="ch-name" class="te-inp" placeholder="e.g., Aria" />
+      <div class="te-lbl">Description (what the AI sees):</div>
+      <textarea id="ch-desc" class="te-inp" rows="2"></textarea>
+      <div class="te-lbl">Personality:</div>
+      <textarea id="ch-personality" class="te-inp" rows="2"></textarea>
+      <div class="te-lbl">Scenario:</div>
+      <textarea id="ch-scenario" class="te-inp" rows="2"></textarea>
+      <div class="te-lbl">First message (greeting):</div>
+      <textarea id="ch-first" class="te-inp" rows="2"></textarea>
+      <div class="te-lbl">Example dialogue:</div>
+      <textarea id="ch-example" class="te-inp" rows="2"></textarea>
+      <div class="te-lbl">System prompt (extra instructions):</div>
+      <textarea id="ch-sys" class="te-inp" rows="2"></textarea>
+      <div class="te-lbl">Post-history instructions:</div>
+      <textarea id="ch-post" class="te-inp" rows="2"></textarea>
+      <div class="te-lbl">Lorebook (JSON — character_book with entries):</div>
+      <textarea id="ch-lore" class="te-inp te-code" rows="3" placeholder='{"name":"Lore","entries":[{"keys":["castle"],"content":"The castle is ancient and cursed."}]}'></textarea>
+      <div class="te-lbl">Tags (comma-separated):</div>
+      <input type="text" id="ch-tags" class="te-inp" placeholder="fantasy, knight" />
+      <div class="te-terminal" id="ch-out">&gt; Ready...</div>
+      <div class="te-action-row">
+        <button class="te-btn-save" id="ch-save">SAVE CHARACTER</button>
+        <button class="te-btn-test" id="ch-use">USE IN CHAT</button>
+      </div>
+    </div>`;
+
+  const listEl   = root.querySelector('#ch-list');
+  const nameEl   = root.querySelector('#ch-name');
+  const descEl   = root.querySelector('#ch-desc');
+  const persEl   = root.querySelector('#ch-personality');
+  const scenEl   = root.querySelector('#ch-scenario');
+  const firstEl  = root.querySelector('#ch-first');
+  const exEl     = root.querySelector('#ch-example');
+  const sysEl    = root.querySelector('#ch-sys');
+  const postEl   = root.querySelector('#ch-post');
+  const loreEl   = root.querySelector('#ch-lore');
+  const tagsEl   = root.querySelector('#ch-tags');
+  const outEl    = root.querySelector('#ch-out');
+  const fileEl   = root.querySelector('#ch-file');
+  const avatarFileEl = root.querySelector('#ch-avatar-file');
+  const avatarPreview = root.querySelector('#ch-avatar-preview');
+  const avatarClearBtn = root.querySelector('#ch-avatar-clear');
+  let avatarData = ''; // data URL of the current avatar
+
+  function setAvatar(dataUrl) {
+    avatarData = dataUrl || '';
+    if (avatarData) {
+      avatarPreview.src = avatarData;
+      avatarPreview.style.display = '';
+      avatarClearBtn.style.display = '';
+    } else {
+      avatarPreview.removeAttribute('src');
+      avatarPreview.style.display = 'none';
+      avatarClearBtn.style.display = 'none';
+    }
+  }
+
+  function setOut(msg, color = '#23c7a8') { outEl.style.color = color; outEl.innerHTML = msg; }
+
+  let charsCache = [];
+  async function refreshList() {
+    try { charsCache = await (await fetch('/api/characters')).json(); } catch { charsCache = []; }
+    const prev = listEl.value;
+    listEl.innerHTML = charsCache.map((c, i) =>
+      `<option value="${i}">${escHtml(c.name)}</option>`).join('');
+    if (prev !== '' && parseInt(prev) < charsCache.length) listEl.value = prev;
+    return charsCache;
+  }
+
+  function populate(c) {
+    if (!c) {
+      nameEl.value=''; descEl.value=''; persEl.value=''; scenEl.value='';
+      firstEl.value=''; exEl.value=''; sysEl.value=''; postEl.value=''; loreEl.value=''; tagsEl.value='';
+      setAvatar('');
+      return;
+    }
+    nameEl.value   = c.name || '';
+    descEl.value   = c.description || '';
+    persEl.value   = c.personality || '';
+    scenEl.value   = c.scenario || '';
+    firstEl.value  = c.first_mes || '';
+    exEl.value     = c.mes_example || '';
+    sysEl.value    = c.system_prompt || '';
+    postEl.value   = c.post_history || '';
+    loreEl.value   = (c.character_book && Object.keys(c.character_book).length) ? JSON.stringify(c.character_book, null, 2) : '';
+    tagsEl.value   = (c.tags || []).join(', ');
+    setAvatar(c.avatar || '');
+    setOut('&gt; Loaded "' + escHtml(c.name) + '".');
+  }
+
+  listEl.addEventListener('change', async () => {
+    const idx = parseInt(listEl.value);
+    const chars = await refreshList();
+    const c = chars[idx];
+    if (c) {
+      const full = await (await fetch(`/api/characters/${c.id}`)).json();
+      populate(full);
+    }
+  });
+
+  root.querySelector('#ch-new').addEventListener('click', () => {
+    listEl.value = '';
+    populate(null);
+    nameEl.focus();
+    setOut('&gt; New character — fill in the fields and click SAVE CHARACTER.');
+  });
+
+  root.querySelector('#ch-del').addEventListener('click', async () => {
+    const chars = await refreshList();
+    const c = chars[parseInt(listEl.value)];
+    if (!c) return;
+    if (!confirm(`Delete character "${c.name}"?`)) return;
+    await fetch(`/api/characters/${c.id}`, { method: 'DELETE' });
+    if (activeCharacter && activeCharacter.name === c.name) activeCharacter = null;
+    await refreshList();
+    populate(null);
+    setOut('&gt; Character deleted.', '#f4a261');
+  });
+
+  // Import a v2 card PNG (also captures its image as the avatar)
+  root.querySelector('#ch-import').addEventListener('click', () => fileEl.click());
+  fileEl.addEventListener('change', async () => {
+    const file = fileEl.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const rr = await fetch('/api/characters/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ png: reader.result }),
+        }).then(r => r.json());
+        if (rr.error) { setOut('&gt; Import failed: ' + escHtml(rr.error), '#ff6b6b'); return; }
+        populate(rr);
+        setOut('&gt; Imported "' + escHtml(rr.name) + '". Click SAVE CHARACTER to store it.', '#f4a261');
+      } catch (e) { setOut('&gt; Import error: ' + escHtml(e.message), '#ff6b6b'); }
+    };
+    reader.readAsDataURL(file);
+    fileEl.value = '';
+  });
+
+  // Avatar upload
+  root.querySelector('#ch-avatar-btn').addEventListener('click', () => avatarFileEl.click());
+  avatarFileEl.addEventListener('change', () => {
+    const f = avatarFileEl.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { setAvatar(r.result); setOut('&gt; Avatar set. Click SAVE CHARACTER to store it.', '#f4a261'); };
+    r.readAsDataURL(f);
+    avatarFileEl.value = '';
+  });
+  avatarClearBtn.addEventListener('click', () => { setAvatar(''); });
+
+  // Export the currently loaded character as a v2 card PNG
+  root.querySelector('#ch-export').addEventListener('click', async () => {
+    const chars = await refreshList();
+    const c = chars[parseInt(listEl.value)];
+    if (!c) return;
+    const a = document.createElement('a');
+    a.href = `/api/characters/${c.id}/export`;
+    a.download = `${c.name}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setOut('&gt; Exported "' + escHtml(c.name) + '" as PNG.', '#23c7a8');
+  });
+
+  function collectCard() {
+    let character_book = {};
+    const raw = loreEl.value.trim();
+    if (raw) {
+      try { character_book = JSON.parse(raw); }
+      catch { setOut('&gt; Lorebook must be valid JSON.', '#ff6b6b'); return null; }
+    }
+    return {
+      name: nameEl.value.trim(),
+      description: descEl.value,
+      personality: persEl.value,
+      scenario: scenEl.value,
+      first_mes: firstEl.value,
+      mes_example: exEl.value,
+      system_prompt: sysEl.value,
+      post_history: postEl.value,
+      character_book,
+      tags: tagsEl.value.split(',').map(s => s.trim()).filter(Boolean),
+      avatar: avatarData,
+    };
+  }
+
+  root.querySelector('#ch-save').addEventListener('click', async () => {
+    const card = collectCard();
+    if (!card) return;
+    if (!card.name) { setOut('&gt; Name is required.', '#ff6b6b'); return; }
+    const rr = await fetch('/api/characters', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(card),
+    }).then(r => r.json()).catch(e => ({ error: e.message }));
+    if (rr.error) { setOut('&gt; Save failed: ' + escHtml(rr.error), '#ff6b6b'); return; }
+    await refreshList();
+    listEl.value = charsCache.findIndex(c => c.name === card.name);
+    setOut('&gt; Character "' + escHtml(card.name) + '" saved.', '#23c7a8');
+  });
+
+  root.querySelector('#ch-use').addEventListener('click', async () => {
+    const card = collectCard();
+    if (!card) return;
+    if (!card.name) { setOut('&gt; Name is required.', '#ff6b6b'); return; }
+    activeCharacter = { ...card };
+    addSystemMsg(`🎭 Now roleplaying as <strong>${escHtml(card.name)}</strong>. The model will adopt this character.`);
+    openModals.get(id)?.close();
+  });
+
+  const off = (modalOffset % 5) * 24; modalOffset++;
+  const wb = new WinBox({
+    title: '🎭 Characters', width: '780px', height: '640px',
+    x: `calc(50% - ${390 - off}px)`, y: `calc(50% - ${320 - off}px)`,
+    background: '#4a4580', border: 2, mount: root,
+    onclose() { openModals.delete(id); },
+  });
+  openModals.set(id, wb);
+  refreshList();
+}
+
+</script>
+</body>
+</html>

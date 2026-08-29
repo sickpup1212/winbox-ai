@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Environment / secrets — never commit
+.env
+dbsys/workarea/db_info.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# Runtime DB connection (written by the app's Settings menu — may contain creds)
+db_config.json
+
+# Session debugging notes
+devtools_error.txt
+chat_output.txt

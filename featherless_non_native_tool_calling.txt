@@ -1,0 +1,65 @@
+import json
+from openai import OpenAI
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+# 1. Initialize client with Featherless endpoint
+client = OpenAI(
+    base_url="https://api.featherless.ai/v1", api_key=os.getenv('FEATHERLESSAI_API_KEY')
+)
+
+# 2. Define your Python function normally
+def get_current_weather(location):
+  return json.dumps({"location": location, "temperature": "72°F", "condition": "Sunny"})
+
+TOOL_MAPPING = {
+    "get_current_weather": get_current_weather
+}
+
+task = "What is the current weather in Miami?"
+
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": task},
+]
+
+tool_call_prompt = (
+    "You have access to a function: get_current_weather(location: str).\n"
+    "When asked about current weather, respond ONLY in the following JSON format:\n"
+    '{\n  "function": "get_current_weather",\n  "arguments": {"location": "<term>"}\n}\n'
+    "Do not answer the question directly. Only output the JSON."
+)
+
+messages_tool = [
+    {"role": "system", "content": tool_call_prompt},
+    {"role": "user", "content": task},
+]
+
+response = client.chat.completions.create(
+    model="OBLITERATUS/Qwen3.8-27B-OBLITERATED",
+    messages=messages_tool,
+    response_format={"type": "json_object"},
+)
+tool_call_json = json.loads(response.choices[0].message.content)
+tool_name = tool_call_json["function"]
+tool_args = tool_call_json["arguments"]
+tool_result = TOOL_MAPPING[tool_name](**tool_args)
+
+answer_prompt = (
+    "You are a helpful assistant.\n"
+    "You have access to the results of a function call.\n"
+    "Use the tool result to answer the user's original question."
+)
+
+messages_final = [
+    {"role": "system", "content": answer_prompt},
+    {"role": "user", "content": task},
+    {"role": "tool", "name": tool_name, "content": json.dumps(tool_result)},
+]
+
+response_final = client.chat.completions.create(
+    model="OBLITERATUS/Qwen3.8-27B-OBLITERATED",
+    messages=messages_final,
+)
+print("\nFinal answer:\n", response_final.choices[0].message.content)

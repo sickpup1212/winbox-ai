@@ -5,15 +5,15 @@ const cors    = require('cors');
 const path    = require('path');
 const OpenAI  = require('openai');
 
-const { PostgresDB, tableFormat } = require('./dbsys/workarea/db_core');
-const { TOOL_DEFINITIONS, dispatchTool } = require('./dbsys/workarea/db_agent_toolkit');
+const { PostgresDB, tableFormat } = require('./tools/js/db_core');
+const { TOOL_DEFINITIONS, dispatchTool } = require('./tools/js/db_agent_toolkit');
 
 const PORT   = process.env.PORT || 3300;
 const HOST   = process.env.HOST || '127.0.0.1'; // bind loopback by default — override with HOST=0.0.0.0 to expose
 // Connection URL resolution order:
 //   1. db_config.json (written by the app's Settings menu — takes precedence)
 //   2. DATABASE_URL env var
-//   3. dbsys/workarea/db_info.txt (legacy fallback, bootstrapping only)
+//   3. tools/db_info.txt (legacy fallback, bootstrapping only)
 const fs = require('fs');
 const DB_CONFIG_PATH = path.join(__dirname, 'db_config.json');
 function loadDbUrl() {

@@ -34,7 +34,12 @@ const { PostgresDB, tableFormat } = require('./db_core');
 // ── Configuration ──────────────────────────────────────────────────────────────
 
 function loadDbUrl() {
-    return fs.readFileSync(path.join(__dirname, 'db_info.txt'), 'utf8').trim();
+    if (process.env.DATABASE_URL) return process.env.DATABASE_URL.trim();
+    try {
+        return fs.readFileSync(path.join(__dirname, 'db_info.txt'), 'utf8').trim();
+    } catch (_) {
+        return '';
+    }
 }
 
 const DB_URL       = loadDbUrl();

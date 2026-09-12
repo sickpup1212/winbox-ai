@@ -37,8 +37,12 @@ from db_agent_toolkit import TOOL_DEFINITIONS, dispatch_tool
 # ── Configuration ────────────────────────────────────────────────────────────
 
 def _load_db_url() -> str:
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"].strip()
     path = os.path.join(os.path.dirname(__file__), "db_info.txt")
-    return open(path).read().strip()
+    if os.path.exists(path):
+        return open(path).read().strip()
+    return ""
 
 DB_URL = _load_db_url()
 DEFAULT_MODEL = os.environ.get("DB_NL_MODEL", "anthropic/claude-3.5-haiku")

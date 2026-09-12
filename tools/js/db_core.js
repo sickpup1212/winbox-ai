@@ -295,6 +295,7 @@ class PostgresDB {
                 return `$${ri * cols.length + ci + 1}`;
             }).join(', ') + ')'
         ).join(', ');
+        await this._ensureConnected();
         const result = await this.client.query(
             `INSERT INTO "${tableName}" (${colStr}) VALUES ${rowPlaceholders}`,
             values
@@ -314,6 +315,7 @@ class PostgresDB {
         const cols = Object.keys(setValues);
         const params = Object.values(setValues);
         const setClause = cols.map((c, i) => `"${c}" = $${i + 1}`).join(', ');
+        await this._ensureConnected();
         const result = await this.client.query(
             `UPDATE "${tableName}" SET ${setClause} WHERE ${where}`,
             params
@@ -330,6 +332,7 @@ class PostgresDB {
      */
     async deleteRows(tableName, where) {
         const whereClause = where ? ` WHERE ${where}` : '';
+        await this._ensureConnected();
         const result = await this.client.query(
             `DELETE FROM "${tableName}"${whereClause}`
         );
@@ -364,6 +367,7 @@ class PostgresDB {
             }).join(', ') + ')'
         ).join(', ');
 
+        await this._ensureConnected();
         const result = await this.client.query(
             `INSERT INTO "${tableName}" (${colStr}) VALUES ${rowPlaceholders} ON CONFLICT (${conflictStr}) ${doClause}`,
             values

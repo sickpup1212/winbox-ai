@@ -60,6 +60,31 @@ const FILE_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'fs_batch_read_files',
+      description: 'Read the contents of multiple files in a single call. Provide an array of file objects {name, folder}. Returns an array of file contents.',
+      parameters: {
+        type: 'object',
+        properties: {
+          files: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name:   { type: 'string', description: 'Filename, e.g. "utils.py"' },
+                folder: { type: 'string', description: 'Folder path, default "/"' },
+              },
+              required: ['name'],
+            },
+            description: 'List of files to read',
+          },
+        },
+        required: ['files'],
+      },
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'fs_write_file',
       description: 'Create or overwrite a file in the persistent store and open it in the editor. Use this when the user asks to save or write a file.',
       parameters: {
@@ -179,3 +204,46 @@ const GENERATE_IMAGE_TOOL = {
     },
   },
 };
+
+const SUBAGENT_TOOL = {
+  type: 'function',
+  function: {
+    name: 'run_subagent',
+    description: 'Run an autonomous database subagent to execute a complex multi-step database task. The subagent plans and executes SQL and schema tools independently and returns a final summary.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'Detailed description of the database task to accomplish.' },
+      },
+      required: ['task'],
+    },
+  },
+};
+
+function filterToolsForAgent(allTools, agentToolsStr) {
+  if (!agentToolsStr || typeof agentToolsStr !== 'string') return allTools;
+  const rawTokens = agentToolsStr.split(/[\s,]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (!rawTokens.length || rawTokens.includes('*') || rawTokens.includes('all')) return allTools;
+
+  return allTools.filter(tool => {
+    const fnName = (tool.function?.name || '').toLowerCase();
+
+    // Exact name match
+    if (rawTokens.includes(fnName)) return true;
+
+    // Toolkit groups
+    for (const token of rawTokens) {
+      if ((token === 'files' || token === 'fs' || token === 'file') && fnName.startsWith('fs_')) return true;
+      if ((token === 'db' || token === 'database' || token === 'sql') &&
+          !fnName.startsWith('fs_') && fnName !== 'open_editor' && fnName !== 'generate_image' &&
+          fnName !== 'skill_read' && fnName !== 'create_skill' && fnName !== 'create_custom_tool' &&
+          fnName !== 'run_subagent') return true;
+      if ((token === 'editor' || token === 'write') && fnName === 'open_editor') return true;
+      if ((token === 'image' || token === 'imagine') && fnName === 'generate_image') return true;
+      if ((token === 'skills' || token === 'skill') && (fnName === 'skill_read' || fnName === 'create_skill')) return true;
+      if ((token === 'custom') && fnName === 'create_custom_tool') return true;
+      if ((token === 'subagent' || token === 'agent') && fnName === 'run_subagent') return true;
+    }
+    return false;
+  });
+}

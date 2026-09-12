@@ -677,6 +677,7 @@ let dbTools          = [];
 let winInstance      = null;
 let chatDoc          = null;
 let pendingAttachments = [];
+let activeAgent      = null;
 let cmdHistoryArr = JSON.parse(localStorage.getItem('cmdHistory') || '[]');
 let cmdHistoryIdx = -1;
 
@@ -1104,10 +1105,11 @@ async function runAiTurn(key, model) {
     // the exact same dispatcher as the native path below.
     let featherlessMode = false;
     if (toolsEnabled && apiProvider === 'Featherless') {
-      const allTools = [EDITOR_TOOL, SKILL_READ_TOOL, CREATE_CUSTOM_TOOL, CREATE_SKILL_TOOL, GENERATE_IMAGE_TOOL, ...FILE_TOOLS, ...dbTools, ...buildCustomToolDefs()];
-      if (allTools.length) {
+      const allTools = [EDITOR_TOOL, SKILL_READ_TOOL, CREATE_CUSTOM_TOOL, CREATE_SKILL_TOOL, GENERATE_IMAGE_TOOL, SUBAGENT_TOOL, ...FILE_TOOLS, ...dbTools, ...buildCustomToolDefs()];
+      const activeTools = filterToolsForAgent(allTools, activeAgent?.tools);
+      if (activeTools.length) {
         featherlessMode = true;
-        const toolDesc = allTools.map(t =>
+        const toolDesc = activeTools.map(t =>
           `- ${t.function.name}: ${t.function.description || ''}\n  parameters: ${JSON.stringify(t.function.parameters || {})}`
         ).join('\n');
         systemContent =
@@ -1166,8 +1168,9 @@ async function runAiTurn(key, model) {
     // model emitted {"function": "", ...} instead of prose in live logs).
     // The system prompt alone carries the call-if-needed protocol.
     if (!featherlessMode && toolsEnabled) {
-      const allTools = [EDITOR_TOOL, SKILL_READ_TOOL, CREATE_CUSTOM_TOOL, CREATE_SKILL_TOOL, GENERATE_IMAGE_TOOL, ...FILE_TOOLS, ...dbTools, ...buildCustomToolDefs()];
-      if (allTools.length) { body.tools = allTools; body.tool_choice = 'auto'; }
+      const allTools = [EDITOR_TOOL, SKILL_READ_TOOL, CREATE_CUSTOM_TOOL, CREATE_SKILL_TOOL, GENERATE_IMAGE_TOOL, SUBAGENT_TOOL, ...FILE_TOOLS, ...dbTools, ...buildCustomToolDefs()];
+      const activeTools = filterToolsForAgent(allTools, activeAgent?.tools);
+      if (activeTools.length) { body.tools = activeTools; body.tool_choice = 'auto'; }
     }
 
     const response = await fetch('/api/chat', {
@@ -1355,6 +1358,23 @@ async function runAiTurn(key, model) {
               const f = list.find(x => x.name === args.name && x.folder === (args.folder || '/'));
               if (!f) throw new Error(`File "${args.name}" not found`);
               toolResult = await fetch(`/api/files/${f.id}`).then(r => r.json());
+            } else if (name === 'fs_batch_read_files') {
+              const fileList = Array.isArray(args.files) ? args.files : [];
+              if (!fileList.length) throw new Error('No files provided in batch read');
+              const storeList = await fetch('/api/files').then(r => r.json());
+              const results = [];
+              for (const fItem of fileList) {
+                const fname = fItem.name || fItem.filename;
+                const ffolder = fItem.folder || '/';
+                const match = storeList.find(x => x.name === fname && x.folder === ffolder);
+                if (!match) {
+                  results.push({ name: fname, folder: ffolder, error: 'File not found' });
+                } else {
+                  const full = await fetch(`/api/files/${match.id}`).then(r => r.json());
+                  results.push({ name: fname, folder: ffolder, content: full.content, language: full.language });
+                }
+              }
+              toolResult = { files: results, count: results.length };
             } else if (name === 'fs_write_file') {
               const saved = await fetch('/api/files', {
                 method: 'POST',
@@ -1373,6 +1393,46 @@ async function runAiTurn(key, model) {
             }
             badge.textContent = '✓ OK'; badge.className = 'tc-badge ok';
             history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: JSON.stringify(toolResult) });
+          } catch (e) {
+            badge.textContent = '✗ ERROR'; badge.className = 'tc-badge err'; badge.title = e.message;
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Error: ${e.message}` });
+          }
+          continue;
+        }
+
+        // Built-in: subagent
+        if (name === 'run_subagent') {
+          try {
+            const taskStr = args.task || '';
+            if (!taskStr) throw new Error('task is required');
+            const key = chatDoc.apiKey.value.trim();
+            const model = chatDoc.modelSel.value;
+            const res = await fetch('/api/agent', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ task: taskStr, apiKey: key, model, baseUrl: normBaseUrl(getApiBaseUrl()) }),
+            });
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            let subagentSummary = '';
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop();
+              for (const line of lines) {
+                const t = line.trim();
+                if (!t.startsWith('data:')) continue;
+                let evt;
+                try { evt = JSON.parse(t.slice(5).trim()); } catch { continue; }
+                if (evt.type === 'done') subagentSummary = evt.summary || 'Task complete.';
+                else if (evt.type === 'error') subagentSummary = `Subagent error: ${evt.message}`;
+              }
+            }
+            badge.textContent = '✓ Subagent'; badge.className = 'tc-badge ok';
+            history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: subagentSummary || 'Subagent executed.' });
           } catch (e) {
             badge.textContent = '✗ ERROR'; badge.className = 'tc-badge err'; badge.title = e.message;
             history.push({ role: 'tool', __fnName: name, tool_call_id: tc.id, content: `Error: ${e.message}` });
@@ -2938,6 +2998,9 @@ function openAgentsModal() {
     history = history.filter(m => m.role !== 'system');
     history.unshift({ role: 'system', content: sys });
     const name = nameEl.value || 'Agent';
+    const list = getAgents();
+    const idx = parseInt(dd.value);
+    activeAgent = (idx >= 0 && list[idx]) ? list[idx] : { name, tools: toolEl.value, systemMessage: sys };
     addSystemMsg(`👤 Agent "<strong>${escHtml(name)}</strong>" activated.`);
     openModals.get(id)?.close();
   });

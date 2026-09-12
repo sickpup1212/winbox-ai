@@ -16,6 +16,8 @@ const COMMANDS = {
   characters:   { usage: '/characters',        desc: 'Manage roleplay character cards' },
   imagine:      { usage: '/imagine <prompt>',   desc: 'Generate an image from a prompt' },
   auto_imagine: { usage: '/auto_imagine',       desc: 'Auto-generate an image of the current scene' },
+  html:         { usage: '/html <filename>',    desc: 'Render an HTML file in a modal' },
+  view:         { usage: '/view <filename>',    desc: 'View/render an HTML file in a modal' },
   tools:        { usage: '/tools',              desc: 'Manage AI tools' },
   clear:        { usage: '/clear',              desc: 'Clear conversation' },
 };
@@ -111,6 +113,22 @@ const FILE_TOOLS = [
           folder: { type: 'string', description: 'Folder path, default "/"' }
         },
         required: ['name']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'fs_view_html',
+      description: 'Display and render an HTML file or raw HTML string in a WinBox modal window. Provide either a stored file name or inline html content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name:    { type: 'string', description: 'Stored HTML filename e.g. "index.html"' },
+          folder:  { type: 'string', description: 'Folder path, default "/"' },
+          content: { type: 'string', description: 'Raw HTML string to render directly' }
+        },
+        required: []
       }
     }
   },

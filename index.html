@@ -1383,7 +1383,25 @@ async function runAiTurn(key, model) {
               }).then(r => r.json());
               if (saved.error) throw new Error(saved.error);
               openEditorWindow({ filename: args.name, content: args.content, language: args.language, fileRef: { id: saved.id, name: saved.name, folder: saved.folder } });
-              toolResult = { saved: true, id: saved.id, message: `"${args.name}" saved and opened in editor.` };
+              const isHtmlFile = args.name.toLowerCase().endsWith('.html') || args.name.toLowerCase().endsWith('.htm') || args.language === 'html';
+              if (isHtmlFile) {
+                openHtmlViewerWindow({ filename: args.name, content: args.content, fileRef: { id: saved.id, name: saved.name, folder: saved.folder } });
+              }
+              toolResult = { saved: true, id: saved.id, message: `"${args.name}" saved and opened in editor${isHtmlFile ? ' and HTML viewer modal' : ''}.` };
+            } else if (name === 'fs_view_html') {
+              let htmlContent = args.content || '';
+              let fname = args.name || 'preview.html';
+              let fileRefObj = null;
+              if (args.name && !args.content) {
+                const list = await fetch('/api/files').then(r => r.json());
+                const f = list.find(x => x.name === args.name && x.folder === (args.folder || '/'));
+                if (!f) throw new Error(`HTML file "${args.name}" not found`);
+                const full = await fetch(`/api/files/${f.id}`).then(r => r.json());
+                htmlContent = full.content;
+                fileRefObj = { id: full.id, name: full.name, folder: full.folder };
+              }
+              openHtmlViewerWindow({ filename: fname, content: htmlContent, fileRef: fileRefObj });
+              toolResult = { viewed: true, filename: fname, message: `HTML rendered in modal window.` };
             } else if (name === 'fs_delete_file') {
               const list = await fetch('/api/files').then(r => r.json());
               const f = list.find(x => x.name === args.name && x.folder === (args.folder || '/'));
@@ -1623,6 +1641,8 @@ function handleCommand(text) {
     case 'characters': return openCharactersModal();
     case 'imagine':  return arg ? cmdImagine(arg) : addSystemMsg('Usage: /imagine &lt;prompt&gt;');
     case 'auto_imagine': return cmdAutoImagine();
+    case 'html':
+    case 'view':     return arg ? cmdViewHtml(arg) : addSystemMsg(`Usage: /${cmd} &lt;filename&gt;`);
     case 'tools':    return openToolsModal();
     case 'clear':    return cmdClear();
     default:         addSystemMsg(`Unknown command: <strong>/${cmd}</strong> — type /help for the list.`);
@@ -1925,6 +1945,30 @@ function cmdClear() {
   chatDoc.messages.innerHTML = '';
   chatDoc.statusBar.textContent = 'tokens: 0';
   addSystemMsg('Conversation cleared.');
+}
+
+// /html <filename> or /view <filename> — render stored HTML file in WinBox modal
+async function cmdViewHtml(targetFile) {
+  let fname = targetFile.trim();
+  let folder = '/';
+  if (fname.includes('/')) {
+    const lastSlash = fname.lastIndexOf('/');
+    folder = fname.slice(0, lastSlash) || '/';
+    fname = fname.slice(lastSlash + 1);
+  }
+  try {
+    const list = await fetch('/api/files').then(r => r.json());
+    const match = list.find(x => x.name.toLowerCase() === fname.toLowerCase() && x.folder === folder);
+    if (!match) {
+      return addSystemMsg(`❌ File "<strong>${escHtml(targetFile)}</strong>" not found in file store.`);
+    }
+    const full = await fetch(`/api/files/${match.id}`).then(r => r.json());
+    if (full.error) throw new Error(full.error);
+    openHtmlViewerWindow({ filename: full.name, content: full.content, fileRef: { id: full.id, name: full.name, folder: full.folder } });
+    addSystemMsg(`🌐 Rendered "<strong>${escHtml(full.name)}</strong>" in modal.`);
+  } catch (e) {
+    addSystemMsg(`❌ Could not render HTML file: ${escHtml(e.message)}`);
+  }
 }
 
 // /imagine <prompt> — generate an image and show it in chat.
@@ -2336,6 +2380,75 @@ async function openModelPicker() {
    UTILITY
 ══════════════════════════════════════════════════════ */
 /* ══════════════════════════════════════════════════════
+   HTML VIEWER WIDGET
+══════════════════════════════════════════════════════ */
+let htmlViewerCount = 0;
+
+function openHtmlViewerWindow({ filename = 'preview.html', content = '', fileRef = null } = {}) {
+  const modalId = fileRef && fileRef.id ? `html-viewer-${fileRef.id}` : `html-viewer-${++htmlViewerCount}`;
+  if (openModals.has(modalId)) {
+    const existingWb = openModals.get(modalId);
+    existingWb.focus();
+    return existingWb;
+  }
+
+  const root = document.createElement('div');
+  root.className = 'ed-root';
+  root.style.background = '#1a1b23';
+  root.innerHTML = `
+    <div class="ed-toolbar">
+      <span style="font-size:12px;font-weight:600;color:#e0e0e0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(filename)}">🌐 ${escHtml(filename)}</span>
+      <button class="ed-tbtn" id="${modalId}-refresh" title="Refresh frame">↺ Refresh</button>
+      <button class="ed-tbtn" id="${modalId}-open-tab" title="Open in new browser tab">↗ New Tab</button>
+      <button class="ed-tbtn" id="${modalId}-edit" title="Open in Code Editor">📝 Edit</button>
+    </div>
+    <div style="flex:1;width:100%;height:100%;overflow:hidden;background:#fff;">
+      <iframe id="${modalId}-frame" style="width:100%;height:100%;border:none;background:#fff;" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
+    </div>`;
+
+  const iframe = root.querySelector(`#${modalId}-frame`);
+  iframe.srcdoc = content;
+
+  root.querySelector(`#${modalId}-refresh`).addEventListener('click', () => {
+    iframe.srcdoc = content;
+  });
+
+  root.querySelector(`#${modalId}-open-tab`).addEventListener('click', () => {
+    const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank');
+  });
+
+  root.querySelector(`#${modalId}-edit`).addEventListener('click', async () => {
+    if (fileRef && fileRef.id) {
+      try {
+        const res = await fetch(`/api/files/${fileRef.id}`).then(r => r.json());
+        openEditorWindow({ filename: res.name, content: res.content, language: res.language, fileRef: { id: res.id, name: res.name, folder: res.folder } });
+      } catch (e) {
+        openEditorWindow({ filename, content, language: 'html' });
+      }
+    } else {
+      openEditorWindow({ filename, content, language: 'html' });
+    }
+  });
+
+  const off = (modalOffset % 8) * 20; modalOffset++;
+  const wb = new WinBox({
+    title: `🌐 HTML: ${filename}`,
+    width: '720px',
+    height: '540px',
+    x: `calc(50% - ${360 - off}px)`,
+    y: `calc(50% - ${270 - off}px)`,
+    background: '#1f3c2e',
+    border: 2,
+    mount: root,
+    onclose() { openModals.delete(modalId); },
+  });
+  openModals.set(modalId, wb);
+  return wb;
+}
+
+/* ══════════════════════════════════════════════════════
    TEXT / CODE EDITOR
 ══════════════════════════════════════════════════════ */
 let editorCount = 0;
@@ -2362,6 +2475,7 @@ function openEditorWindow({ filename = 'untitled.txt', content = '', language = 
         ${LANGS.map(l => `<option value="${l}"${l === language ? ' selected' : ''}>${l}</option>`).join('')}
       </select>
       <button class="ed-tbtn" id="${eid}-wrap" title="Toggle word wrap">↵ Wrap</button>
+      <button class="ed-tbtn" id="${eid}-preview" title="Preview rendered HTML in WinBox modal">🌐 Preview</button>
       <button class="ed-tbtn" id="${eid}-copy">📋 Copy</button>
       <button class="ed-tbtn" id="${eid}-dl">⬇ Save</button>
       <button class="ed-tbtn" id="${eid}-new" title="Open a new blank editor">＋ New</button>
@@ -2447,6 +2561,15 @@ function openEditorWindow({ filename = 'untitled.txt', content = '', language = 
         refresh();
       }
     }
+  });
+
+  // Preview HTML
+  root.querySelector(`#${eid}-preview`).addEventListener('click', () => {
+    openHtmlViewerWindow({
+      filename: fileEl.value.trim() || 'preview.html',
+      content: ta.value,
+      fileRef: fileRef ? { id: fileRef.id, name: fileRef.name, folder: fileRef.folder } : null
+    });
   });
 
   // Word-wrap toggle
@@ -2624,6 +2747,7 @@ async function openFileExplorer() {
   function selectFile(f) {
     selectedFile = f;
     root.querySelectorAll('.fe-file-row').forEach(r => r.classList.toggle('fe-selected', +r.dataset.id === f.id));
+    const isHtml = f.name.toLowerCase().endsWith('.html') || f.name.toLowerCase().endsWith('.htm') || f.language === 'html';
     const det = root.querySelector('#fe-detail');
     det.innerHTML = `
       <div class="fe-detail-name">${icon(f.name)} ${escHtml(f.name)}</div>
@@ -2635,14 +2759,28 @@ async function openFileExplorer() {
         <span class="fe-meta-lbl">Created</span><span class="fe-meta-val">${fmtDate(f.created_at)}</span>
       </div>
       <div class="fe-actions">
+        ${isHtml ? `<button class="fe-act" id="fe-view-html">🌐 View HTML</button>` : ''}
         <button class="fe-act" id="fe-open">📝 Open in Editor</button>
         <button class="fe-act" id="fe-rename">✏ Rename</button>
         <button class="fe-act fe-danger" id="fe-delete">🗑 Delete</button>
       </div>`;
 
+    if (isHtml) {
+      det.querySelector('#fe-view-html')?.addEventListener('click', () => openHtmlInViewer(f));
+    }
     det.querySelector('#fe-open').addEventListener('click',   () => openInEditor(f));
     det.querySelector('#fe-rename').addEventListener('click', () => renameFile(f));
     det.querySelector('#fe-delete').addEventListener('click', () => deleteFile(f));
+  }
+
+  async function openHtmlInViewer(f) {
+    try {
+      const res = await fetch(`/api/files/${f.id}`).then(r => r.json());
+      if (res.error) throw new Error(res.error);
+      openHtmlViewerWindow({ filename: res.name, content: res.content, fileRef: { id: res.id, name: res.name, folder: res.folder } });
+    } catch (e) {
+      addSystemMsg(`❌ Could not view HTML: ${escHtml(e.message)}`);
+    }
   }
 
   async function openInEditor(f) {
